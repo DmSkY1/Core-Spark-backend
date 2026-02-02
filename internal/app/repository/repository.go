@@ -32,6 +32,9 @@ type Repo interface {
 	RequestResetPassword(id int, token string) error
 	ResetPasswordRepository(password string, id int) error
 	TokenVerification(token string) (*models.Token_Verification_Model, error)
+	CheckSession(session string) (*models.Session_Check_Model, error)
+	DeleteSession(session string) error
+	UpdateExpiresAtSession(session string) error
 }
 
 func NewRepository(db *pgxpool.Pool) Repo {
@@ -437,8 +440,8 @@ func (r *repository_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID
 		session_uuid,
 		user.ID,
 		login_data.User_Agent,
-		time.Now(),
-		time.Now().Add(time.Hour*336),
+		time.Now().UTC(),
+		time.Now().Add(time.Hour*336).UTC(),
 		true,
 	); err != nil {
 		fmt.Println(err)
@@ -675,4 +678,52 @@ func (r *repository_struct) ChangePasswordProfile(id int, new_password, old_pass
 		return err
 	}
 	return nil // TODO этот метод еще не совсем корректный, в будущем надо его доделать
+}
+
+func (r *repository_struct) DeleteSession(session string) error {
+	uuid_session, err := uuid.Parse(session)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(context.Background(), `DELETE FROM sessions WHERE uuid = $1`, uuid_session)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *repository_struct) UpdateExpiresAtSession(session string) error {
+	uuid_session, err := uuid.Parse(session)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(
+		context.Background(),
+		`UPDATE sessions SET expires_at = $1 WHERE uuid = $2`,
+		time.Now().Add(720*time.Hour).UTC(),
+		uuid_session,
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *repository_struct) CheckSession(session string) (*models.Session_Check_Model, error) {
+	session_model := new(models.Session_Check_Model)
+
+	err := r.db.QueryRow(
+		context.Background(),
+		`SELECT uuid, id_user, created_at, expires_at, is_active FROM sessions WHERE uuid = $1`,
+		session).Scan(
+		&session_model.UUID,
+		&session_model.User_id,
+		&session_model.Created_at,
+		&session_model.Expires_at,
+		&session_model.Is_active,
+	)
+	if err != nil {
+		return nil, err // TODO логировать
+	}
+	return session_model, nil
 }

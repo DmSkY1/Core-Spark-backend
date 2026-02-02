@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,14 +10,18 @@ import (
 	"gobackend/internal/app/service"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type handler_struct struct {
 	serv service.Serv
+	red  *redis.Client
 }
 
-func NewHandler(serv service.Serv) *handler_struct {
-	return &handler_struct{serv: serv}
+func NewHandler(serv service.Serv, red *redis.Client) *handler_struct {
+	return &handler_struct{serv: serv, red: red}
 }
 
 func (h *handler_struct) UploadAvatar(w http.ResponseWriter, r *http.Request) {
@@ -194,4 +199,97 @@ func (h *handler_struct) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func DelCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_id",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Now().Add(-1 * time.Hour),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionCookie, err := r.Cookie("session_id")
+		if err != nil {
+			http.Error(w, "Cookie not found", http.StatusNotFound) // Кука не найдена, возвращаем ошибку
+			return
+		}
+		var user_id int
+		key := fmt.Sprintf("session:%s", sessionCookie.Value)
+
+		redis_value, err := h.red.Get(context.Background(), key).Result()
+		if err == redis.Nil { // записи в редис нет, переход к проверке в бд
+			fmt.Printf("failed to set data, error: %s", err.Error())
+			req, err := h.serv.VerifySession(sessionCookie.Value) // получение данных из бд
+			if err != nil {
+				DelCookie(w)
+				http.Error(w, "Invalid session", http.StatusUnauthorized)
+				return
+			}
+			user_id = req.User_id
+			data, err := json.Marshal(req)
+			if err != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+
+			if err := h.red.Set(context.Background(), key, data, 12*time.Hour).Err(); err != nil { // добавление записи сессии в редис
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+		} else if err != nil {
+			fmt.Printf("failed to get value, error: %v\n", err)
+		} else {
+			var session_value models.Session_Check_Model
+
+			if err := json.Unmarshal([]byte(redis_value), &session_value); err != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			if !session_value.Is_active {
+				DelCookie(w)
+				http.Error(w, "Unauthorized: session is inactive", http.StatusUnauthorized)
+				return
+			}
+			if session_value.Expires_at.Before(time.Now()) {
+				DelCookie(w)
+				if err := h.serv.DelSession(sessionCookie.Value); err != nil {
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					return // TODO возвращать нормальные ошибки и логировать
+				}
+				if _, err := h.red.Del(context.Background(), key).Result(); err != nil { // удаление записи из редиса
+					http.Error(w, "Internal server error", http.StatusInternalServerError)
+					return
+				}
+				http.Error(w, "Session expired", http.StatusUnauthorized)
+				return
+			}
+			if int(time.Until(session_value.Expires_at.UTC()).Hours()/24) <= 7 {
+				if err := h.serv.UpadateExpiresSession(sessionCookie.Value); err != nil {
+					http.Error(w, "Internal server error", http.StatusInternalServerError)
+					return
+				}
+				session_value.Expires_at = time.Now().UTC().Add(720 * time.Hour)
+				update_session, err := json.Marshal(session_value)
+				if err != nil {
+					http.Error(w, "Internal server error", http.StatusInternalServerError)
+					return
+				}
+				if err := h.red.Set(context.Background(), key, update_session, 12*time.Hour); err != nil {
+					http.Error(w, "Internal server error", http.StatusInternalServerError)
+					return
+				}
+			}
+			user_id = session_value.User_id
+		}
+		ctx := context.WithValue(r.Context(), "user_id", user_id) // Возвращаем id пользователя через контекст
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }

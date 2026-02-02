@@ -39,6 +39,9 @@ type Serv interface {
 	ReqPasswordReset(email string) error
 	TokenVerifier(token string) (int, error)
 	ResetPasswordService(id int, password string) error
+	VerifySession(session string) (*models.Session_Check_Model, error)
+	DelSession(session string) error
+	UpadateExpiresSession(session string) error
 }
 
 func NewService(repo repository.Repo, email_sender email.SMPTSender) Serv {
@@ -203,6 +206,22 @@ func (s *service_struct) ResetPasswordService(id int, password string) error {
 		return err
 	}
 	return nil
+}
+
+func (s *service_struct) VerifySession(session string) (*models.Session_Check_Model, error) {
+	req, err := s.repo.CheckSession(session) // Сделать проверку срока годности токенаЫ
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (s *service_struct) DelSession(session string) error {
+	return s.repo.DeleteSession(session)
+}
+
+func (s *service_struct) UpadateExpiresSession(session string) error {
+	return s.repo.UpdateExpiresAtSession(session)
 }
 
 func (s *service_struct) ReqPasswordReset(email string) error { // Запрос на изменение пароля, с отправкой ссылки на почту
