@@ -8,6 +8,7 @@ import (
 	"gobackend/internal/app/models"
 	"gobackend/internal/app/repository"
 	"gobackend/internal/app/service"
+	"gobackend/pkg/logger"
 	"net/http"
 	"os"
 	"time"
@@ -17,7 +18,10 @@ import (
 )
 
 func main() {
+	defer logger.Log.Sync()
+	//logger.InitFileLogger()
 
+	logger.Log.Info("start")
 	db := database.DBConnection()
 	defer db.Close()
 

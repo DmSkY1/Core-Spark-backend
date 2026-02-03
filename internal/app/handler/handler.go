@@ -57,7 +57,7 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()      // получение query параметров
 	page := query.Get("page")   // номер страницы
 	limit := query.Get("limit") // лимит карточек товаров
-	userid, ok := r.Context().Value("id").(int)
+	userid, ok := r.Context().Value("user_id").(int)
 	if !ok {
 		items, err := h.serv.CatalogCheckGuest(page, limit)
 		if err != nil {
@@ -218,7 +218,7 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionCookie, err := r.Cookie("session_id")
 		if err != nil {
-			http.Error(w, "Cookie not found", http.StatusNotFound) // Кука не найдена, возвращаем ошибку
+			next.ServeHTTP(w, r) // Кука не найдена, возвращаем управление, но только гостевой режим
 			return
 		}
 		var user_id int
@@ -230,61 +230,50 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 			req, err := h.serv.VerifySession(sessionCookie.Value) // получение данных из бд
 			if err != nil {
 				DelCookie(w)
-				http.Error(w, "Invalid session", http.StatusUnauthorized)
+				next.ServeHTTP(w, r)
 				return
 			}
 			user_id = req.User_id
 			data, err := json.Marshal(req)
 			if err != nil {
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				next.ServeHTTP(w, r)
 				return
 			}
 
 			if err := h.red.Set(context.Background(), key, data, 12*time.Hour).Err(); err != nil { // добавление записи сессии в редис
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
 			}
 		} else if err != nil {
-			fmt.Printf("failed to get value, error: %v\n", err)
+			next.ServeHTTP(w, r)
+			return
 		} else {
 			var session_value models.Session_Check_Model
 
 			if err := json.Unmarshal([]byte(redis_value), &session_value); err != nil {
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				next.ServeHTTP(w, r)
 				return
 			}
 			if !session_value.Is_active {
 				DelCookie(w)
-				http.Error(w, "Unauthorized: session is inactive", http.StatusUnauthorized)
+				next.ServeHTTP(w, r)
 				return
 			}
 			if session_value.Expires_at.Before(time.Now()) {
 				DelCookie(w)
 				if err := h.serv.DelSession(sessionCookie.Value); err != nil {
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-					return // TODO возвращать нормальные ошибки и логировать
+					// TODO возвращать нормальные ошибки и логировать
 				}
-				if _, err := h.red.Del(context.Background(), key).Result(); err != nil { // удаление записи из редиса
-					http.Error(w, "Internal server error", http.StatusInternalServerError)
-					return
-				}
-				http.Error(w, "Session expired", http.StatusUnauthorized)
+				h.red.Del(context.Background(), key).Result()
+				next.ServeHTTP(w, r)
 				return
 			}
 			if int(time.Until(session_value.Expires_at.UTC()).Hours()/24) <= 7 {
 				if err := h.serv.UpadateExpiresSession(sessionCookie.Value); err != nil {
-					http.Error(w, "Internal server error", http.StatusInternalServerError)
-					return
+
 				}
 				session_value.Expires_at = time.Now().UTC().Add(720 * time.Hour)
 				update_session, err := json.Marshal(session_value)
-				if err != nil {
-					http.Error(w, "Internal server error", http.StatusInternalServerError)
-					return
-				}
-				if err := h.red.Set(context.Background(), key, update_session, 12*time.Hour); err != nil {
-					http.Error(w, "Internal server error", http.StatusInternalServerError)
-					return
+				if err == nil {
+					h.red.Set(context.Background(), key, update_session, 12*time.Hour)
 				}
 			}
 			user_id = session_value.User_id

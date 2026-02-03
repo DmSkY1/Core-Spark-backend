@@ -213,6 +213,9 @@ func (s *service_struct) VerifySession(session string) (*models.Session_Check_Mo
 	if err != nil {
 		return nil, err
 	}
+	if req.Expires_at.Before(time.Now()) {
+		return nil, errors.New("Session is not valid")
+	}
 	return req, nil
 }
 
