@@ -2,10 +2,15 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"gobackend/internal/app/email"
 	"gobackend/internal/app/models"
 	"gobackend/internal/app/repository"
 	"gobackend/pkg"
+	"gobackend/pkg/logger"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"mime/multipart"
 	"os"
 	"path/filepath"
@@ -26,15 +31,21 @@ var allowedExts = map[string]bool{
 	".png":  true,
 	".jpg":  true,
 	".jpeg": true,
-	".webp": true,
 }
+
+const (
+	minWidth  = 200
+	minHeight = 200
+	maxWidth  = 800
+	maxHeight = 800
+)
 
 type Serv interface {
 	RegisterUser(register_data *models.Register_Model) error
-	LoginUser(login_data *models.Login_Model) (uuid.UUID, error)
+	LoginUser(login_data *models.Login_Model) (uuid.UUID, int, error)
 	AvatarCheck(files []*multipart.FileHeader, id int) error
-	CatalogCheckGuest(pageStr, limitStr string) ([]models.Response_For_Guests_Model, error)
-	CatalogCheckAuthUser(pageStr, limitStr string, id int) ([]models.Response_For_AuthUser_Model, error)
+	CatalogCheckGuest(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_Guests_Model, error)
+	CatalogCheckAuthUser(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_AuthUser_Model, error)
 	GetComponents() (*models.Components, error)
 	ReqPasswordReset(email string) error
 	TokenVerifier(token string) (int, error)
@@ -42,6 +53,13 @@ type Serv interface {
 	VerifySession(session string) (*models.Session_Check_Model, error)
 	DelSession(session string) error
 	UpadateExpiresSession(session string) error
+	GetUserProfileService(id int) (*models.Profile_Model, error)
+	AddCartService(id, config_id int) error
+	UpdateCartItemQuantityService(user_id, config_id, num int) error
+	RemoveFromCartService(id, config_id int) error
+	CartItemsService(user_id int) ([]models.Cart_Item, error)
+	SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error)
+	SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error)
 }
 
 func NewService(repo repository.Repo, email_sender email.SMPTSender) Serv {
@@ -56,52 +74,78 @@ func (s *service_struct) RegisterUser(register_data *models.Register_Model) erro
 	return nil
 }
 
+func (s *service_struct) GetUserProfileService(id int) (*models.Profile_Model, error) {
+	user, err := s.repo.GetUserProfile(id)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		return nil, err
+	}
+	return user, nil
+}
+
 func (s *service_struct) AvatarCheck(files []*multipart.FileHeader, id int) error {
 
 	if len(files) == 0 {
 		return errors.New("file not transferred")
 	}
-	if len(files) > 1 {
+	if len(files) > 1 { //
 		return errors.New("only one file can be uploaded")
 	}
 
-	handler := files[0]
-	file, err := handler.Open()
+	handler := files[0]         // Берем 1 файл из массива файлов
+	file, err := handler.Open() // открываем файл
 	if err != nil {
 		return errors.New("failed to open file")
 	}
-
 	defer file.Close()
 
-	if handler.Size > 5<<20 {
-		return errors.New("file too large (max 5 MB)")
+	if handler.Size > 700*1024 { // проверка на размер файла, он не должен быть большк 700 кб
+		return errors.New("file too large (max 700 KB)")
 	}
 
-	ext := filepath.Ext(handler.Filename)
+	ext := filepath.Ext(handler.Filename) // Получние расширения файла,
 	if ext == "" {
 		return errors.New("file has no extension")
 	}
 
-	if !allowedExts[strings.ToLower(ext)] {
-		return errors.New("Only PNG, JPEG, JPG, WEBP are allowed")
+	if !allowedExts[strings.ToLower(ext)] { // проверка на доступыне расширения
+		return errors.New("Only PNG, JPEG, JPG are allowed")
 	}
 
-	uuid_photo := uuid.New().String() + ext
-
-	save_photo, err := os.Create(filepath.Join("/var/www/i.core-spark/images/avatars", uuid_photo)) // TODO доделать и проверить работоспособность
+	imgCfg, _, err := image.DecodeConfig(file) // читаем конфиг фото (ширина высота)
 	if err != nil {
-		return errors.New("error reading file")
+		fmt.Println(err)
+		return err
 	}
 
+	if _, err := file.Seek(0, 0); err != nil { // возвращаем указатель файла в начало, для полного его прочтения
+		logger.Log.Error(err.Error())
+		return err
+	}
+
+	if imgCfg.Width < minWidth || imgCfg.Height < minHeight { // проверка на мин ширину и длину
+		return fmt.Errorf("image too small (minimum %dx%d pixels)", minWidth, minHeight)
+	}
+
+	if imgCfg.Width > maxWidth || imgCfg.Height > maxHeight { // проверка на макс ширину и длину
+		return fmt.Errorf("image too large (maximum %dx%d pixels)", maxWidth, maxHeight)
+	}
+
+	uuid_photo := uuid.New().String() + ext // генерация имени файла
+
+	save_photo, err := os.Create(filepath.Join("/home/dmsky/", uuid_photo)) // создание файла пустышки
+	if err != nil {
+		return errors.New("error creating file")
+	}
 	defer save_photo.Close()
 
-	_, err = save_photo.ReadFrom(file)
+	_, err = save_photo.ReadFrom(file) // заполнение файла данными -> становится фотографией
 	if err != nil {
 		return errors.New("Error saving file")
 	}
-
-	if err := s.repo.AddAvatar(filepath.Join("/images/avatar/", uuid_photo), id); err != nil {
-		return err
+	if err := s.repo.AddAvatar(filepath.Join("/images/avatar/", uuid_photo), id); err != nil { // запрос на добавление пути к фото для пользователя
+		logger.Log.Error(err.Error())
+		return fmt.Errorf("internal server error")
 	}
 
 	return nil
@@ -115,7 +159,65 @@ func (s *service_struct) GetComponents() (*models.Components, error) {
 	return items, nil
 }
 
-func (s *service_struct) CatalogCheckGuest(pageStr, limitStr string) ([]models.Response_For_Guests_Model, error) {
+func (s *service_struct) SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error) {
+	var page, limit int
+
+	if pageStr == "" {
+		page = 1
+	} else {
+		var err error
+		page, err = strconv.Atoi(pageStr)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if limitStr == "" {
+		limit = 10
+	} else {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			return nil, err
+		}
+	}
+	req, err := s.repo.SearchItemsAuthUser(ram, gpu, cpu, category, price, search_string, id, page, limit, order)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (s *service_struct) SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error) {
+	var page, limit int
+
+	if pageStr == "" {
+		page = 1
+	} else {
+		var err error
+		page, err = strconv.Atoi(pageStr)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if limitStr == "" {
+		limit = 10
+	} else {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			return nil, err
+		}
+	}
+	req, err := s.repo.SearchItemsGuest(ram, gpu, cpu, category, price, search_string, page, limit, order)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (s *service_struct) CatalogCheckGuest(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_Guests_Model, error) {
 	var page, limit int
 
 	if pageStr == "" {
@@ -138,7 +240,7 @@ func (s *service_struct) CatalogCheckGuest(pageStr, limitStr string) ([]models.R
 		}
 	}
 
-	items, err := s.repo.LoadCatalogGuest(page, limit)
+	items, err := s.repo.LoadCatalogGuest(page, limit, id, order, category, ram, gpu, cpu, price)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +248,38 @@ func (s *service_struct) CatalogCheckGuest(pageStr, limitStr string) ([]models.R
 	return items, nil
 }
 
-func (s *service_struct) CatalogCheckAuthUser(pageStr, limitStr string, id int) ([]models.Response_For_AuthUser_Model, error) {
+func (s *service_struct) UpdateCartItemQuantityService(user_id, config_id, num int) error {
+	if err := s.repo.UpdateCartItemQuantity(user_id, config_id, num); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *service_struct) AddCartService(id, config_id int) error {
+	err := s.repo.AddCart(id, config_id)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *service_struct) CartItemsService(user_id int) ([]models.Cart_Item, error) {
+	req, err := s.repo.CartItems(user_id)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (s *service_struct) RemoveFromCartService(id, config_id int) error {
+	err := s.repo.RemoveFromCart(id, config_id)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *service_struct) CatalogCheckAuthUser(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_AuthUser_Model, error) {
 	var page, limit int
 
 	if pageStr == "" {
@@ -158,18 +291,13 @@ func (s *service_struct) CatalogCheckAuthUser(pageStr, limitStr string, id int) 
 			return nil, err
 		}
 	}
-
-	if limitStr == "" {
-		limit = 10
-	} else {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			return nil, err
-		}
+	var err error
+	limit, err = strconv.Atoi(limitStr)
+	if err != nil {
+		return nil, err
 	}
 
-	items, err := s.repo.LoadCatalogAuthUser(page, limit, id)
+	items, err := s.repo.LoadCatalogAuthUser(page, limit, id, order, category, ram, gpu, cpu, price)
 	if err != nil {
 		return nil, err
 	}
@@ -177,12 +305,13 @@ func (s *service_struct) CatalogCheckAuthUser(pageStr, limitStr string, id int) 
 	return items, nil
 }
 
-func (s *service_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID, error) {
-	userSession_uuid, err := s.repo.LoginUser(login_data)
+func (s *service_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID, int, error) {
+	userSession_uuid, user_id, err := s.repo.LoginUser(login_data)
 	if err != nil {
-		return uuid.Nil, err
+		logger.Log.Info(err.Error())
+		return uuid.Nil, 0, err
 	}
-	return userSession_uuid, nil
+	return userSession_uuid, user_id, nil
 }
 
 func (s *service_struct) TokenVerifier(token string) (int, error) {

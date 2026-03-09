@@ -11,6 +11,8 @@ type Response_For_Guests_Model struct {
 	Series           *string `json:"series"`
 	Total_Ram_GB     int     `json:"total_ram_gb"`
 	Price            float32 `json:"price"`
+	Total_count      int     `json:"total_count"`
+	Article          string  `json:"article"`
 }
 
 type Response_For_AuthUser_Model struct {
@@ -25,4 +27,6 @@ type Response_For_AuthUser_Model struct {
 	Total_Ram_GB     int     `json:"total_ram_gb"`
 	In_Cart          bool    `json:"in_cart"`
 	Price            float32 `json:"price"`
+	Total_count      int     `json:"total_count"`
+	Article          string  `json:"article"`
 }

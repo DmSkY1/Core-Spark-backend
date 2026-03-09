@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func main() {
@@ -42,6 +43,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// TODO Инициализировать хеширование каталога, компонентов конфигуратора для оптимизированной работы
+	// Синхронизация сессий, сохранение сессии в редис, и изменение сразу во всех(кторые привязаны к пользователю)
+
 	emailSender := email.NewSMTPSender(
 		os.Getenv("SMTP_HOST"),
 		587,
@@ -50,18 +55,45 @@ func main() {
 	)
 
 	_repo := repository.NewRepository(db)
+
+	components, err := _repo.Components()
+	if err != err {
+		logger.Log.Warn(err.Error())
+	}
+	data, err := msgpack.Marshal(components) // TODO Убрать весь этот ужас в функцим в хендлере, и сделать асинхронами
+	if err != nil {
+		logger.Log.Warn(err.Error())
+	}
+	if err := redisDB.Set(context.Background(), "configurator:components", data, 0).Err(); err != nil {
+		logger.Log.Warn(err.Error())
+	}
+
+	// TODO инициализировать загрузку компонентов в кеш здесь, желательно асинхронно
 	_service := service.NewService(_repo, *emailSender)
 	_handler := handler.NewHandler(_service, redisDB)
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)               // TODO заменить в будущем на другой логер
-	r.Use(_handler.SessionCheckMiddleware) // Для проверки сессии на работоспособность
-	r.Post("/register", _handler.Register)
-	r.Post("/login", _handler.Login)
-	r.Post("/forgot-password", _handler.RequestPasswordReset)
-	r.Get("/api/catalog", _handler.Catalog)
-	r.Get("/api/components", _handler.Components)
-	r.Get("/api/verify-token", _handler.IsTokenValid)
-	r.Post("/api/reset-password", _handler.ResetPassword)
-	http.ListenAndServe(":3000", r)
+	r.Use(_handler.RateLimiterMiddleware(100, 130))
+	r.Use(middleware.Logger)                                    // TODO заменить в будущем на другой логер
+	r.Use(_handler.SessionCheckMiddleware)                      // Для проверки сессии на работоспособность
+	r.Post("/register", _handler.Register)                      // Регистариция пользователя
+	r.Post("/login", _handler.Login)                            // авторизация пользователя
+	r.Post("/forgot_password", _handler.RequestPasswordReset)   // смена пароля, отправка письма на почту
+	r.Get("/api/catalog", _handler.Catalog)                     // получение товаров для каталога
+	r.Get("/api/catalog/search", _handler.SearchCatalog)        // поиск в каталоге
+	r.Get("/api/user/profile", _handler.GetProfile)             // получение профиля пользователя
+	r.Post("/api/user/upload_avatar", _handler.UploadAvatar)    // загрузка аватара пользователя
+	r.Get("/api/components", _handler.Components)               // получение всех компонентов для конфигуратора
+	r.Post("/api/cart/add", _handler.AddCart)                   // добавляет товар в корзину
+	r.Post("/api/cart/update", _handler.UpdateCartItemQuantity) // увеличивает или уменьшает количество товара в корзине
+	r.Post("/api/cart/remove", _handler.RemoveFromCart)         // удаляет товар из корзины
+	r.Get("/api/cart/items", _handler.Cart_Items)               // получение всех товаров из корзины пользователя
+	r.Post("/api/cart/config/add", _handler.AddConfigToCart)    // добавление кастомной сборки в корзину
+	r.Get("/api/verify_token", _handler.IsTokenValid)           // проверка токена для смены пароля
+	r.Post("/api/reset_password", _handler.ResetPassword)       // запрос на смену пароля
+
+	if err := http.ListenAndServe(":3000", r); err != nil {
+		logger.Log.Warn(err.Error())
+		panic(err)
+	}
 }

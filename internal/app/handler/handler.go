@@ -8,11 +8,16 @@ import (
 	"gobackend/internal/app/models"
 	"gobackend/internal/app/repository"
 	"gobackend/internal/app/service"
+	"gobackend/pkg/logger"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/vmihailenco/msgpack/v5"
+	"golang.org/x/time/rate"
 )
 
 type handler_struct struct {
@@ -25,41 +30,123 @@ func NewHandler(serv service.Serv, red *redis.Client) *handler_struct {
 }
 
 func (h *handler_struct) UploadAvatar(w http.ResponseWriter, r *http.Request) {
-	userid, ok := r.Context().Value("id").(int)
+
+	userid, ok := r.Context().Value("user_id").(int)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 6<<20)
 
-	if err := r.ParseMultipartForm(6 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, 700*1024) // Ограничитель веса тела запроса, не пропускает большие запросы (установлен ограничитель в 700кб)
+
+	if err := r.ParseMultipartForm(700 * 1024); err != nil { // Парсим форму, и задаем ограничиьель
+		logger.Log.Info(err.Error())
 		if strings.Contains(err.Error(), "request body too large") {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"code":   http.StatusRequestEntityTooLarge,
-				"status": "request body too large (max 5-6 Mb)",
+				"status": "request body too large (max 700 KB)",
 			})
+			return
 		} else {
+
 			http.Error(w, "invalid request format", http.StatusBadRequest)
+			return
 		}
 	}
 
-	files := r.MultipartForm.File["photo"]
+	files := r.MultipartForm.File["photo"] // Берем значения из мапы по ключу -> получаем массив указателей
 
 	if err := h.serv.AvatarCheck(files, userid); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+
+		http.Error(w, "", http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"code":    http.StatusBadRequest,
+			"message": err.Error(),
+		})
 		return
 	}
+}
 
+func (h *handler_struct) SearchCatalog(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	order := query.Get("order")
+	price := query.Get("price")
+	category := query["category"]
+	ram := query["ram"]
+	gpu := query["gpu"]
+	cpu := query["cpu"]
+	search_string := query.Get("search")
+	page := query.Get("page")
+	userid, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		items, err := h.serv.SearchGuestService(
+			normalizeToStringSlice(ram),
+			normalizeToStringSlice(gpu),
+			normalizeToStringSlice(cpu),
+			normalizeToStringSlice(category),
+			price,
+			search_string,
+			page,
+			"9",
+			order,
+		) // Жеская передача 9, заключается в особой ненадобности регулировать лимит пользователем, поэтому задано фиксированное число
+		if err != nil {
+			fmt.Println(err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(items); err != nil {
+			return
+		}
+	} else {
+		items, err := h.serv.SearchAuthUserService(
+			normalizeToStringSlice(ram),
+			normalizeToStringSlice(gpu),
+			normalizeToStringSlice(cpu),
+			normalizeToStringSlice(category),
+			price,
+			search_string,
+			userid,
+			page,
+			"9",
+			order,
+		)
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(items); err != nil {
+			return
+		}
+	}
 }
 
 func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()      // получение query параметров
-	page := query.Get("page")   // номер страницы
-	limit := query.Get("limit") // лимит карточек товаров
+	query := r.URL.Query()        // получение query параметров
+	order := query.Get("order")   // параметр для cортировки
+	price := query.Get("price")   // параметр для цены 100-1000 (мин-макс)
+	category := query["category"] // параметр для категории
+	ram := query["ram"]           // параметр для оперативной памяти
+	gpu := query["gpu"]           // параметр для ведокарты
+	cpu := query["cpu"]           // параметр для процесосора
+	page := query.Get("page")     // номер страницы
+	// limit := query.Get("limit") // лимит карточек товаров
 	userid, ok := r.Context().Value("user_id").(int)
 	if !ok {
-		items, err := h.serv.CatalogCheckGuest(page, limit)
+		items, err := h.serv.CatalogCheckGuest(
+			page,
+			"9",
+			price,
+			userid,
+			order,
+			normalizeToStringSlice(category),
+			normalizeToStringSlice(ram),
+			normalizeToStringSlice(gpu),
+			normalizeToStringSlice(cpu),
+		) // Жеская передача 9, заключается в особой ненадобности регулировать лимит пользователем, поэтому задано фиксированное число
 		if err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
@@ -68,9 +155,18 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(items); err != nil {
 			return
 		}
-
 	} else {
-		items, err := h.serv.CatalogCheckAuthUser(page, limit, userid)
+		items, err := h.serv.CatalogCheckAuthUser(
+			page,
+			"9",
+			price,
+			userid,
+			order,
+			normalizeToStringSlice(category),
+			normalizeToStringSlice(ram),
+			normalizeToStringSlice(gpu),
+			normalizeToStringSlice(cpu),
+		)
 		if err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
@@ -80,6 +176,99 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func (h *handler_struct) AddCart(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+	var add_cartModel models.Universal_Model_Cart
+	json.NewDecoder(r.Body).Decode(&add_cartModel)
+
+	err := h.serv.AddCartService(user_id, add_cartModel.ID_Config)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *handler_struct) RemoveFromCart(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+
+	var remove_model models.Universal_Model_Cart
+	json.NewDecoder(r.Body).Decode(&remove_model)
+
+	err := h.serv.RemoveFromCartService(user_id, remove_model.ID_Config)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *handler_struct) Cart_Items(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+
+	req, err := h.serv.CartItemsService(user_id)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(req)
+}
+
+func (h *handler_struct) UpdateCartItemQuantity(w http.ResponseWriter, r *http.Request) {
+	var res models.Update_Cart_Items_Quantity
+	json.NewDecoder(r.Body).Decode(&res)
+
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+
+	if err := h.serv.UpdateCartItemQuantityService(user_id, res.ID_config, res.Num); err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *handler_struct) AddConfigToCart(w http.ResponseWriter, r *http.Request) {
+	var c models.User_Config_Model
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+	fmt.Println(user_id)
+	json.NewDecoder(r.Body).Decode(&c)
+}
+
+func (h *handler_struct) GetProfile(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	user_profile, err := h.serv.GetUserProfileService(user_id)
+	if err != nil {
+		logger.Log.Error(err.Error())
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(user_profile)
+}
+
+func (h *handler_struct) Cart(w http.ResponseWriter, r *http.Request) {
+	// TODO доделать
 }
 
 func (h *handler_struct) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
@@ -100,12 +289,23 @@ func (h *handler_struct) RequestPasswordReset(w http.ResponseWriter, r *http.Req
 }
 
 func (h *handler_struct) Components(w http.ResponseWriter, r *http.Request) {
-	items, err := h.serv.GetComponents()
+	data, err := h.red.Get(context.Background(), "configurator:components").Bytes()
 	if err != nil {
-		fmt.Println(err)
-		return
+		logger.Log.Error(err.Error())
+	}
+	var items models.Components
+
+	if err := msgpack.Unmarshal(data, &items); err != nil {
+		logger.Log.Error(err.Error())
 	}
 
+	// TODO дописать в случае, если в редис ничего нет, то обращаться в бд
+	//items, err := h.serv.GetComponents()
+	//if err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
+	logger.Log.Info("уРА")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(items)
 }
@@ -144,7 +344,7 @@ func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	userSession_uuid, err := h.serv.LoginUser(userLogin)
+	userSession_uuid, user_id, err := h.serv.LoginUser(userLogin)
 	if err != nil {
 		return
 	}
@@ -154,10 +354,17 @@ func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   false, // TODO в финале изменить на true
+		Expires:  time.Now().Add(1 * time.Hour),
 		MaxAge:   3600,
 	})
-	http.Redirect(w, r, "https://core-spark.space/", 200)
-	w.Write([]byte(userSession_uuid.String()))
+	data, err := msgpack.Marshal(userSession_uuid)
+	if err != nil {
+		logger.Log.Error(err.Error())
+	}
+	h.red.Set(context.Background(), fmt.Sprintf("session:%s", data), userSession_uuid, 12*time.Hour)
+	h.red.SAdd(context.Background(), fmt.Sprintf("user:%s", strconv.Itoa(user_id)), userSession_uuid)
+
+	w.WriteHeader(200)
 }
 
 func (h *handler_struct) IsTokenValid(w http.ResponseWriter, r *http.Request) { // Должен вызываться первым при загрузке страницы, чтобы проверить токен на валидность
@@ -201,6 +408,47 @@ func (h *handler_struct) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (h *handler_struct) RateLimiterMiddleware(rps int, burst int) func(http.Handler) http.Handler {
+	limiters := make(map[string]*rate.Limiter)
+	mu := sync.Mutex{}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := r.RemoteAddr
+			if forwarded := r.Header.Get("X-Real-IP"); forwarded != "" {
+				ip = forwarded
+			}
+			mu.Lock()
+			limiter, exist := limiters[ip]
+			if !exist {
+				limiter = rate.NewLimiter(rate.Limit(rps), burst)
+				limiters[ip] = limiter
+			}
+			mu.Unlock()
+
+			if !limiter.Allow() {
+				w.Header().Set("Retry-After", "1")
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func normalizeToStringSlice(v interface{}) []string { // Для преобразования string в []string
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return []string{}
+		}
+		return []string{val}
+	case []string:
+		return val
+	default:
+		return []string{}
+	}
+}
+
 func DelCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_id",
@@ -214,6 +462,8 @@ func DelCookie(w http.ResponseWriter) {
 	})
 }
 
+// TODO Сделать проверку действительности куки, на ее срок жизни
+
 func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionCookie, err := r.Cookie("session_id")
@@ -226,7 +476,7 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 
 		redis_value, err := h.red.Get(context.Background(), key).Result()
 		if err == redis.Nil { // записи в редис нет, переход к проверке в бд
-			fmt.Printf("failed to set data, error: %s", err.Error())
+			//fmt.Printf("failed to set data, error: %s", err.Error())
 			req, err := h.serv.VerifySession(sessionCookie.Value) // получение данных из бд
 			if err != nil {
 				DelCookie(w)
@@ -266,7 +516,7 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 				next.ServeHTTP(w, r)
 				return
 			}
-			if int(time.Until(session_value.Expires_at.UTC()).Hours()/24) <= 7 {
+			if int(time.Until(session_value.Expires_at.UTC()).Hours()/24) <= 7 { // сессия не должна быть меньше 7 дней, иначе обновление срока жизни
 				if err := h.serv.UpadateExpiresSession(sessionCookie.Value); err != nil {
 
 				}
