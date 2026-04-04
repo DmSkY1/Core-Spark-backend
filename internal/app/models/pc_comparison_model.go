@@ -1,6 +1,9 @@
 package models
 
 type PC_model struct {
+	ID_Config      int
+	Name           string
+	Photo          string
 	Processor      Processor_Comparison_Model
 	Motherboard    Motherboard_Comparison_Model
 	GPU            Video_Card_Comparison_Model

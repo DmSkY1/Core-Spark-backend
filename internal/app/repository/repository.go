@@ -999,6 +999,9 @@ func (r *repository_struct) SearchItemsGuest(ram, gpu, cpu, category []string, p
 func (r *repository_struct) GetPCByID(ctx context.Context, id int, sql string) (models.PC_model, error) {
 	var pc_components models.PC_model
 	err := r.db.QueryRow(ctx, sql, id).Scan(
+		&pc_components.ID_Config,
+		&pc_components.Name,
+		&pc_components.Photo,
 		&pc_components.Processor.Manufacturer,
 		&pc_components.Processor.Product_Line,
 		&pc_components.Processor.Model,
@@ -1104,7 +1107,8 @@ func (r *repository_struct) GettingPCForComparison(pc_id []int) (*[]models.PC_mo
 	g, ctx := errgroup.WithContext(context.Background()) // Группа ошибок, для отлавливания их в горутинах
 	pc_comparison := make([]models.PC_model, len(pc_id)) // потоко безопасен для горутин
 	sql := `
-		SELECT proc.manufacturer, proc.product_line, proc.model,
+		SELECT cp.id, cp.name, cp.photo, 
+			proc.manufacturer, proc.product_line, proc.model,
 			proc.socket, proc.architecture, proc.number_cores,
 			proc.number_threads, proc.frequency, proc.tdp,
 			proc.max_tdp, proc.ram_standart, proc.integrated_graphics_core,
