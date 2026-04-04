@@ -17,6 +17,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/vmihailenco/msgpack/v5"
+	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
 
@@ -219,6 +220,7 @@ func (h *handler_struct) Cart_Items(w http.ResponseWriter, r *http.Request) {
 
 	req, err := h.serv.CartItemsService(user_id)
 	if err != nil {
+		logger.Log.Error("An error occurred while retrieving items from the cart:", zap.Error(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -243,13 +245,19 @@ func (h *handler_struct) UpdateCartItemQuantity(w http.ResponseWriter, r *http.R
 }
 
 func (h *handler_struct) AddConfigToCart(w http.ResponseWriter, r *http.Request) {
-	var c models.User_Config_Model
+	var config models.User_Config_Model
 	user_id, ok := r.Context().Value("user_id").(int)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	}
-	fmt.Println(user_id)
-	json.NewDecoder(r.Body).Decode(&c)
+	json.NewDecoder(r.Body).Decode(&config)
+
+	if err := h.serv.AddCustomConfigToCartService(user_id, config); err != nil {
+		//logger.Log.Info(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *handler_struct) GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +313,6 @@ func (h *handler_struct) Components(w http.ResponseWriter, r *http.Request) {
 	//	fmt.Println(err)
 	//	return
 	//}
-	logger.Log.Info("уРА")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(items)
 }
@@ -334,6 +341,24 @@ func (h *handler_struct) Register(w http.ResponseWriter, r *http.Request) {
 
 	w.Write([]byte("успех"))
 
+}
+
+func (h *handler_struct) GetComponentsPC(w http.ResponseWriter, r *http.Request) {
+	var id models.Comparison_Request_Model
+
+	if err := json.NewDecoder(r.Body).Decode(&id); err != nil {
+		http.Error(w, "Incorrect IDs", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	pc, err := h.serv.GettingPCForComparisonService(id.ID)
+	if err != nil {
+		http.Error(w, "Incorrect data", http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(pc)
 }
 
 func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {

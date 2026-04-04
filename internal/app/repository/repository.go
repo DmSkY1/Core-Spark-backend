@@ -13,7 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/sync/errgroup"
 )
@@ -45,6 +47,8 @@ type Repo interface {
 	CartItems(user_id int) ([]models.Cart_Item, error)
 	SearchItemsGuest(ram, gpu, cpu, category []string, price, search_string string, page, limit int, order string) ([]models.Response_For_Guests_Model, error)
 	SearchItemsAuthUser(ram, gpu, cpu, category []string, price, search_string string, id, page, limit int, order string) ([]models.Response_For_AuthUser_Model, error)
+	AddCustomConfigToCart(id int, config models.User_Config_Model) (err error)
+	GettingPCForComparison(pc_id []int) (*[]models.PC_model, error)
 }
 
 func NewRepository(db *pgxpool.Pool) Repo {
@@ -52,7 +56,7 @@ func NewRepository(db *pgxpool.Pool) Repo {
 }
 
 var (
-	UserExist = errors.New("this user already exists") // TODO добавлять ошибки по мере разработки
+	UserExist = errors.New("this user already exists")
 )
 
 func (r *repository_struct) CreateUser(register_data *models.Register_Model) (err error) {
@@ -990,6 +994,373 @@ func (r *repository_struct) SearchItemsGuest(ram, gpu, cpu, category []string, p
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (r *repository_struct) GetPCByID(ctx context.Context, id int, sql string) (models.PC_model, error) {
+	var pc_components models.PC_model
+	err := r.db.QueryRow(ctx, sql, id).Scan(
+		&pc_components.Processor.Manufacturer,
+		&pc_components.Processor.Product_Line,
+		&pc_components.Processor.Model,
+		&pc_components.Processor.Socket,
+		&pc_components.Processor.Architecture,
+		&pc_components.Processor.Number_Cores,
+		&pc_components.Processor.Number_Threads,
+		&pc_components.Processor.Frequency,
+		&pc_components.Processor.TDP,
+		&pc_components.Processor.Max_TDP,
+		&pc_components.Processor.Ram_Standart,
+		&pc_components.Processor.Integrated_Graphics_Core,
+		&pc_components.Motherboard.Name,
+		&pc_components.Motherboard.Manufacturer,
+		&pc_components.Motherboard.Chipset,
+		&pc_components.Motherboard.Ram_Type,
+		&pc_components.Motherboard.Max_Ram,
+		&pc_components.Motherboard.Socket,
+		&pc_components.Motherboard.PCIE_x16_Port,
+		&pc_components.Motherboard.PCIE_x1_Port,
+		&pc_components.Motherboard.Wifi,
+		&pc_components.Motherboard.Audio_Codec,
+		&pc_components.Motherboard.Form_Factor,
+		&pc_components.Motherboard.Ram_Slots,
+		&pc_components.Motherboard.M2_Slots,
+		&pc_components.Motherboard.Sata_Slots,
+		&pc_components.GPU.Manufacturer,
+		&pc_components.GPU.GPU_Manufacturer,
+		&pc_components.GPU.Series,
+		&pc_components.GPU.PCIE,
+		&pc_components.GPU.Video_Memory_Capacity,
+		&pc_components.GPU.HDMI,
+		&pc_components.GPU.DisplayPort,
+		&pc_components.GPU.Memory_Type,
+		&pc_components.GPU.GPU_Frequency,
+		&pc_components.GPU.Bandwidth,
+		&pc_components.GPU.Video_Memory_Frequency,
+		&pc_components.GPU.Consumption,
+		&pc_components.GPU.Memory_Bus,
+		&pc_components.RAM.Module.Name,
+		&pc_components.RAM.Module.Brand,
+		&pc_components.RAM.Module.Volume_One_Module,
+		&pc_components.RAM.Module.Memory_Type,
+		&pc_components.RAM.Module.Frequency,
+		&pc_components.RAM.Module.Number_Modules,
+		&pc_components.RAM.Quantity,
+		&pc_components.SSD_M2.Module.Manufacturer,
+		&pc_components.SSD_M2.Module.Model,
+		&pc_components.SSD_M2.Module.PCIE,
+		&pc_components.SSD_M2.Module.Storage_Capacity,
+		&pc_components.SSD_M2.Module.Reading_Speed,
+		&pc_components.SSD_M2.Module.Write_Speed,
+		&pc_components.SSD_M2.Module.Rewrite_Resource,
+		&pc_components.SSD_M2.Quantity,
+		&pc_components.SSD_SATA.Module.Manufacturer,
+		&pc_components.SSD_SATA.Module.Model,
+		&pc_components.SSD_SATA.Module.Storage_Capacity,
+		&pc_components.SSD_SATA.Module.Reading_Speed,
+		&pc_components.SSD_SATA.Module.Write_Speed,
+		&pc_components.SSD_SATA.Module.Rewrite_Resource,
+		&pc_components.SSD_SATA.Quantity,
+		&pc_components.HDD.Module.Manufacturer,
+		&pc_components.HDD.Module.Form_Factor,
+		&pc_components.HDD.Module.Model,
+		&pc_components.HDD.Module.Storage_Capacity,
+		&pc_components.HDD.Module.Rotation_Speed,
+		&pc_components.HDD.Quantity,
+		&pc_components.Power_Unit.Manufacturer,
+		&pc_components.Power_Unit.Model,
+		&pc_components.Power_Unit.Power,
+		&pc_components.Power_Unit.Has_Ocp,
+		&pc_components.Power_Unit.Has_Ovp,
+		&pc_components.Power_Unit.Has_Uvp,
+		&pc_components.Power_Unit.Has_Scp,
+		&pc_components.Power_Unit.Has_Opp,
+		&pc_components.Power_Unit.Fan_Size,
+		&pc_components.Power_Unit.Form_Factor,
+		&pc_components.Frame.Manufacturer,
+		&pc_components.Frame.Model,
+		&pc_components.Frame.Supports_Mini_Itx,
+		&pc_components.Frame.Supports_Micro_Atx,
+		&pc_components.Frame.Supports_Atx,
+		&pc_components.Frame.Supports_E_Atx,
+		&pc_components.Frame.Liquid_Cooling_System,
+		&pc_components.Frame.Fans_Included,
+		&pc_components.Frame.Maximum_Length_GPU,
+		&pc_components.Frame.Maximum_Cooler_Height,
+		&pc_components.Frame.Type_Size,
+		&pc_components.Cooling_System.Manufacturer,
+		&pc_components.Cooling_System.Model,
+		&pc_components.Cooling_System.Type,
+		&pc_components.Cooling_System.Sockets,
+		&pc_components.Cooling_System.Dissipated_Power,
+	)
+	if err != nil {
+		return models.PC_model{}, err
+	}
+	return pc_components, nil
+}
+
+func (r *repository_struct) GettingPCForComparison(pc_id []int) (*[]models.PC_model, error) {
+
+	g, ctx := errgroup.WithContext(context.Background()) // Группа ошибок, для отлавливания их в горутинах
+	pc_comparison := make([]models.PC_model, len(pc_id)) // потоко безопасен для горутин
+	sql := `
+		SELECT proc.manufacturer, proc.product_line, proc.model,
+			proc.socket, proc.architecture, proc.number_cores,
+			proc.number_threads, proc.frequency, proc.tdp,
+			proc.max_tdp, proc.ram_standart, proc.integrated_graphics_core,
+			m.name, m.manufacturer, m.chipset,
+			m.ram_type, m.max_ram, m.socket,
+			m.pcie_x16_port, m.pcie_x1_port, m.wifi,
+			m.audio_codec, m.form_factor, m.ram_slots,
+			m.m2_slots, m.sata_slots, v.manufacturer,
+			v.gpu_manufacturer, v.series,
+			v.pcie, v.video_memory_capacity, v.hdmi,
+			v.displayport, v.memory_type, v.gpu_frequency,
+			v.bandwidth, v.video_memory_frequency, v.consumption,
+			v.memory_bus, r.name, r.brand,
+			r.volume_one_module, r.memory_type, r.frequency,
+			r.number_modules, rm.quantity, ssdm2.manufacturer,
+			ssdm2.model, ssdm2.pcie, ssdm2.storage_capacity,
+			ssdm2.reading_speed, ssdm2.write_speed, ssdm2.rewrite_resource,
+			ssdm2c.quantity, ssdsata.manufacturer, ssdsata.model,
+			ssdsata.storage_capacity, ssdsata.reading_speed, ssdsata.write_speed,
+			ssdsata.rewrite_resource, ssdsatac.quantity, h.manufacturer,
+			h.form_factor, h.model, h.storage_capacity, h.rotation_speed,
+			hc.quantity, pw.manufacturer, pw.model,
+			pw.power, pw.has_ocp, pw.has_ovp,
+			pw.has_uvp, pw.has_scp, pw.has_opp,
+			pw.fan_size, pw.form_factor, f.manufacturer,
+			f.model, f.supports_mini_itx, f.supports_micro_atx,
+			f.supports_atx, f.supports_e_atx, f.liquid_cooling_system,
+			f.fans_included, f.maximum_length_gpu, f.maximum_cooler_height,
+			f.type_size, cs.manufacturer, cs.model,
+			cs.type, cs.sockets, cs.dissipated_power
+		FROM config_pc cp
+		JOIN processor proc ON cp.id_processor = proc.id
+		JOIN motherboard m ON cp.id_motherboard = m.id
+		LEFT JOIN video_card v ON cp.id_video_card = v.id
+		JOIN ram_config rm ON cp.id_pc_ram_config = rm.id
+		JOIN ram r ON rm.id_ram = r.id
+		LEFT JOIN ssd_m2_config ssdm2c ON cp.id_ssd_m2_config = ssdm2c.id
+		LEFT JOIN ssd_m2 ssdm2 ON ssdm2c.id_ssd_m2 = ssdm2.id
+		LEFT JOIN ssd_sata_config ssdsatac ON cp.id_ssd_config = ssdsatac.id
+		LEFT JOIN ssd_sata ssdsata ON ssdsatac.id_ssd_sata = ssdsata.id
+		LEFT JOIN hdd_config hc ON cp.id_hdd_config = hc.id
+		LEFT JOIN hdd h ON hc.id_hdd = h.id
+		JOIN power_unit pw ON cp.id_power_unit = pw.id
+		JOIN frame f ON cp.id_frame = f.id
+		JOIN cooling_system cs ON cp.id_cooling_system = cs.id
+		WHERE cp.id = $1
+	`
+
+	for index, value := range pc_id { // Перебор входного массива
+		g.Go(func() error {
+			pc, err := r.GetPCByID(ctx, value, sql) // Вызов йункции для получения характеристик
+			if err != nil {
+				return err
+			}
+			pc_comparison[index] = pc // добавление в массив по индексу
+			return nil
+		})
+	}
+
+	// Отлов ошибки из горутин
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return &pc_comparison, nil
+}
+
+func (r *repository_struct) AddCustomConfigToCart(id int, config models.User_Config_Model) (err error) {
+
+	ctx := context.Background()
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	var cartID int
+	var customConfigID int
+	var ramId int
+	var hddID pgtype.Int4
+	var ssdSataId pgtype.Int4
+	var ssdM2Id pgtype.Int4
+
+	err = tx.QueryRow(
+		ctx,
+		`SELECT id 
+		FROM cart
+		WHERE id_user = $1`,
+		id,
+	).Scan(&cartID)
+	if err != nil {
+		logger.Log.Error("Error in cart transaction:", zap.Error(err))
+		return err
+	}
+
+	err = tx.QueryRow(
+		ctx,
+		`INSERT INTO ram_config (id_ram, quantity)
+		VALUES ($1, $2)
+		ON CONFLICT (id_ram, quantity) 
+		DO UPDATE SET quantity = ram_config.quantity
+		RETURNING id`,
+		config.Ram.ID,
+		config.Ram.Count,
+	).Scan(&ramId)
+
+	if err != nil {
+		logger.Log.Error("Error in ram_config transaction:", zap.Error(err))
+		return err
+	}
+
+	if config.HDD.ID != 0 && config.HDD.Count != 0 {
+		err = tx.QueryRow(
+			ctx,
+			`INSERT INTO hdd_config (id_hdd, quantity)
+			VALUES ($1, $2)
+			ON CONFLICT (id_hdd, quantity)
+			DO UPDATE SET quantity = hdd_config.quantity
+			RETURNING id`,
+			config.HDD.ID,
+			config.HDD.Count,
+		).Scan(&hddID)
+
+		if err != nil {
+			logger.Log.Error("Error in hdd_config transaction:", zap.Error(err))
+			return err
+		}
+	}
+
+	if config.SSD_M2.ID != 0 && config.SSD_M2.Count != 0 {
+		err = tx.QueryRow(
+			ctx,
+			`INSERT INTO ssd_m2_config (id_ssd_m2, quantity) 
+			VALUES ($1, $2)
+			ON CONFLICT (id_ssd_m2, quantity)
+			DO UPDATE SET quantity = ssd_m2_config.quantity
+			RETURNING id`,
+			config.SSD_M2.ID,
+			config.SSD_M2.Count,
+		).Scan(&ssdM2Id)
+
+		if err != nil {
+			logger.Log.Error("Error in ssd_m2_config transaction:", zap.Error(err))
+			return err
+		}
+	}
+
+	if config.SSD_Sata.ID != 0 && config.SSD_Sata.Count != 0 {
+		err = tx.QueryRow(
+			ctx,
+			`INSERT INTO ssd_sata_config (id_ssd_sata, quantity)
+			VALUES ($1, $2)
+			ON CONFLICT (id_ssd_sata, quantity)
+			DO UPDATE SET quantity = ssd_sata_config.quantity
+			RETURNING id`,
+			config.SSD_Sata.ID,
+			config.SSD_Sata.Count,
+		).Scan(&ssdSataId)
+
+		if err != nil {
+			logger.Log.Error("Error in ssd_sata_config transaction:", zap.Error(err))
+			return err
+		}
+	}
+	// TODO исправить суммирование компонентов, он выдает неправильную сумму
+	err = tx.QueryRow(
+		ctx,
+		`WITH 
+			frame_data AS (SELECT photo, price AS frame_price FROM frame WHERE id = $9),
+			total_price AS (
+				SELECT
+					(SELECT price FROM processor WHERE id = $1) + 
+					(SELECT price FROM motherboard WHERE id = $2) +
+					(SELECT price FROM video_card WHERE id = $4) +
+					(SELECT price FROM power_unit WHERE id = $5) +
+					(SELECT frame_price FROM frame_data) +
+					(SELECT price FROM cooling_system WHERE id = $10) +
+					COALESCE((SELECT r.price * rc.quantity FROM ram r JOIN ram_config rc ON r.id = rc.id_ram WHERE rc.id = $3), 0) +
+					COALESCE((SELECT h.price * hc.quantity FROM hdd h JOIN hdd_config hc ON h.id = hc.id_hdd WHERE hc.id = $8), 0) +
+					COALESCE((SELECT s.price * sc.quantity FROM ssd_m2 s JOIN ssd_m2_config sc ON s.id = sc.id_ssd_m2 WHERE sc.id = $6), 0) +
+					COALESCE((SELECT s.price * sc.quantity FROM ssd_sata s JOIN ssd_sata_config sc ON s.id = sc.id_ssd_sata WHERE sc.id = $7), 0) 
+					AS total
+			) 
+		INSERT INTO config_pc (
+			id_processor,
+			id_motherboard,
+			id_pc_ram_config,
+			id_video_card,
+			id_power_unit,
+			id_ssd_m2_config,
+			id_ssd_config,
+			id_hdd_config,
+			id_frame,
+			id_cooling_system,
+			name,
+			photo,
+			price,
+			category,
+			is_catalog,
+			article,
+			short_description,
+			product_description
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (SELECT photo FROM frame_data), (SELECT total+15000 FROM total_price), $12, $13, $14, $15, $16)
+		RETURNING id
+		`,
+		config.Cpu_ID,
+		config.Motherboard_ID,
+		ramId,
+		config.GPU_ID,
+		config.Power_Unit_ID,
+		ssdM2Id,
+		ssdSataId,
+		hddID,
+		config.Frame_ID,
+		config.Cooling_System_ID,
+		"Кастомный ПК",
+		"custom",
+		false,
+		nil,
+		nil,
+		nil,
+	).Scan(&customConfigID)
+
+	if err != nil {
+		logger.Log.Error("Error in config_pc transaction:", zap.Error(err))
+		return err
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`INSERT INTO cart_pc (id_cart, id_config, quantity)
+		VALUES ($1, $2, 1)
+		ON CONFLICT (id_cart, id_config)
+		DO UPDATE SET 
+			quantity = cart_pc.quantity + 1;`,
+		cartID,
+		customConfigID,
+	)
+
+	if err != nil {
+		logger.Log.Error("Error in add config to cart_pc transaction:", zap.Error(err))
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *repository_struct) UpdateCartItemQuantity(user_id, config_id, num int) (err error) {

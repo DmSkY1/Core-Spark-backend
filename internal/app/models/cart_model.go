@@ -17,7 +17,7 @@ type Cart_Item struct {
 	ID_config    int     `json:"id_config"`
 	Name         string  `json:"name"`
 	Photo        string  `json:"photo"`
-	Article      string  `json:"article"`
+	Article      *string `json:"article"`
 	Quantity     int     `json:"quantity"`
 	Price        float32 `json:"price"`
 }

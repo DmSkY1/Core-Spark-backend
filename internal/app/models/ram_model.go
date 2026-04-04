@@ -17,3 +17,12 @@ type Ram_Config struct {
 	Id_Ram   int `json:"id_ram"`
 	Quantity int `json:"quantity"`
 }
+
+type Ram_Comparison_Model struct {
+	Name              string `json:"name"`
+	Brand             string `json:"brand"`
+	Volume_One_Module int    `json:"volume_one_module"` // объем одного модуля
+	Memory_Type       string `json:"memory_type"`       // тип оперативной памяти
+	Frequency         int    `json:"frequency"`         // частота оперативной памяти
+	Number_Modules    int    `json:"number_modules"`    // количество модулей в комплекте
+}

@@ -17,3 +17,12 @@ type Ssd_Sata_Config_Model struct {
 	Id_Ssd_Sata int `json:"id_ssd_sata"`
 	Quantity    int `json:"quantity"`
 }
+
+type Ssd_Sata_Comparison_Model struct {
+	Manufacturer     *string `json:"manufacturer"`
+	Model            *string `json:"model"`
+	Storage_Capacity *int    `json:"storage_capacity"`
+	Reading_Speed    *int    `json:"reading_speed"`
+	Write_Speed      *int    `json:"write_speed"`
+	Rewrite_Resource *int    `json:"rewrite_resource"`
+}

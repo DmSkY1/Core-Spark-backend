@@ -58,8 +58,10 @@ type Serv interface {
 	UpdateCartItemQuantityService(user_id, config_id, num int) error
 	RemoveFromCartService(id, config_id int) error
 	CartItemsService(user_id int) ([]models.Cart_Item, error)
+	AddCustomConfigToCartService(id int, config models.User_Config_Model) error
 	SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error)
 	SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error)
+	GettingPCForComparisonService(pc_id []int) (*[]models.PC_model, error)
 }
 
 func NewService(repo repository.Repo, email_sender email.SMPTSender) Serv {
@@ -149,6 +151,33 @@ func (s *service_struct) AvatarCheck(files []*multipart.FileHeader, id int) erro
 	}
 
 	return nil
+}
+
+func (s *service_struct) AddCustomConfigToCartService(id int, config models.User_Config_Model) error {
+	err := s.repo.AddCustomConfigToCart(id, config)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *service_struct) GettingPCForComparisonService(pc_id []int) (*[]models.PC_model, error) {
+	if len(pc_id) == 0 || len(pc_id) > 3 {
+		return nil, errors.New("The array with the identifier cannot be empty or greater than 3.")
+	}
+
+	for _, value := range pc_id {
+		if value <= 0 {
+			return nil, errors.New("Incorrect IDs")
+		}
+	}
+
+	pc, err := s.repo.GettingPCForComparison(pc_id)
+	if err != nil {
+		return nil, err
+	}
+
+	return pc, nil
 }
 
 func (s *service_struct) GetComponents() (*models.Components, error) {
