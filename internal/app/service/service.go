@@ -61,7 +61,7 @@ type Serv interface {
 	AddCustomConfigToCartService(id int, config models.User_Config_Model) error
 	SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error)
 	SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error)
-	GettingPCForComparisonService(pc_id []int) (*[]models.PC_model, error)
+	GettingPCForComparisonService(pc_id []int, user_id int) (*[]models.PC_model, error)
 }
 
 func NewService(repo repository.Repo, email_sender email.SMPTSender) Serv {
@@ -161,7 +161,7 @@ func (s *service_struct) AddCustomConfigToCartService(id int, config models.User
 	return nil
 }
 
-func (s *service_struct) GettingPCForComparisonService(pc_id []int) (*[]models.PC_model, error) {
+func (s *service_struct) GettingPCForComparisonService(pc_id []int, user_id int) (*[]models.PC_model, error) {
 	if len(pc_id) == 0 || len(pc_id) > 3 {
 		return nil, errors.New("The array with the identifier cannot be empty or greater than 3.")
 	}
@@ -172,7 +172,7 @@ func (s *service_struct) GettingPCForComparisonService(pc_id []int) (*[]models.P
 		}
 	}
 
-	pc, err := s.repo.GettingPCForComparison(pc_id)
+	pc, err := s.repo.GettingPCForComparison(pc_id, user_id)
 	if err != nil {
 		return nil, err
 	}

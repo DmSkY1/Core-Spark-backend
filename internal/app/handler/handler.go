@@ -346,13 +346,21 @@ func (h *handler_struct) Register(w http.ResponseWriter, r *http.Request) {
 func (h *handler_struct) GetComponentsPC(w http.ResponseWriter, r *http.Request) {
 	var id models.Comparison_Request_Model
 
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		user_id = 0
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(&id); err != nil {
 		http.Error(w, "Incorrect IDs", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
-	pc, err := h.serv.GettingPCForComparisonService(id.ID)
+	fmt.Println(id.ID)
+
+	pc, err := h.serv.GettingPCForComparisonService(id.ID, user_id)
 	if err != nil {
 		http.Error(w, "Incorrect data", http.StatusBadRequest)
 		return

@@ -48,7 +48,7 @@ type Repo interface {
 	SearchItemsGuest(ram, gpu, cpu, category []string, price, search_string string, page, limit int, order string) ([]models.Response_For_Guests_Model, error)
 	SearchItemsAuthUser(ram, gpu, cpu, category []string, price, search_string string, id, page, limit int, order string) ([]models.Response_For_AuthUser_Model, error)
 	AddCustomConfigToCart(id int, config models.User_Config_Model) (err error)
-	GettingPCForComparison(pc_id []int) (*[]models.PC_model, error)
+	GettingPCForComparison(pc_id []int, user_id int) (*[]models.PC_model, error)
 }
 
 func NewRepository(db *pgxpool.Pool) Repo {
@@ -996,12 +996,13 @@ func (r *repository_struct) SearchItemsGuest(ram, gpu, cpu, category []string, p
 	return items, nil
 }
 
-func (r *repository_struct) GetPCByID(ctx context.Context, id int, sql string) (models.PC_model, error) {
+func (r *repository_struct) GetPCByID(ctx context.Context, id int, sql string, user_id int) (models.PC_model, error) {
 	var pc_components models.PC_model
-	err := r.db.QueryRow(ctx, sql, id).Scan(
+	err := r.db.QueryRow(ctx, sql, id, user_id).Scan(
 		&pc_components.ID_Config,
 		&pc_components.Name,
 		&pc_components.Photo,
+		&pc_components.Price,
 		&pc_components.Processor.Manufacturer,
 		&pc_components.Processor.Product_Line,
 		&pc_components.Processor.Model,
@@ -1095,19 +1096,21 @@ func (r *repository_struct) GetPCByID(ctx context.Context, id int, sql string) (
 		&pc_components.Cooling_System.Type,
 		&pc_components.Cooling_System.Sockets,
 		&pc_components.Cooling_System.Dissipated_Power,
+		&pc_components.In_Cart,
 	)
 	if err != nil {
+		fmt.Println(err)
 		return models.PC_model{}, err
 	}
 	return pc_components, nil
 }
 
-func (r *repository_struct) GettingPCForComparison(pc_id []int) (*[]models.PC_model, error) {
+func (r *repository_struct) GettingPCForComparison(pc_id []int, user_id int) (*[]models.PC_model, error) {
 
 	g, ctx := errgroup.WithContext(context.Background()) // Группа ошибок, для отлавливания их в горутинах
 	pc_comparison := make([]models.PC_model, len(pc_id)) // потоко безопасен для горутин
 	sql := `
-		SELECT cp.id, cp.name, cp.photo, 
+		SELECT cp.id, cp.name, cp.photo, cp.price,
 			proc.manufacturer, proc.product_line, proc.model,
 			proc.socket, proc.architecture, proc.number_cores,
 			proc.number_threads, proc.frequency, proc.tdp,
@@ -1138,7 +1141,10 @@ func (r *repository_struct) GettingPCForComparison(pc_id []int) (*[]models.PC_mo
 			f.supports_atx, f.supports_e_atx, f.liquid_cooling_system,
 			f.fans_included, f.maximum_length_gpu, f.maximum_cooler_height,
 			f.type_size, cs.manufacturer, cs.model,
-			cs.type, cs.sockets, cs.dissipated_power
+			cs.type, cs.sockets, cs.dissipated_power,
+			CASE
+				WHEN cpc.id_config IS NOT NULL THEN TRUE ELSE FALSE
+			END AS in_cart
 		FROM config_pc cp
 		JOIN processor proc ON cp.id_processor = proc.id
 		JOIN motherboard m ON cp.id_motherboard = m.id
@@ -1154,12 +1160,14 @@ func (r *repository_struct) GettingPCForComparison(pc_id []int) (*[]models.PC_mo
 		JOIN power_unit pw ON cp.id_power_unit = pw.id
 		JOIN frame f ON cp.id_frame = f.id
 		JOIN cooling_system cs ON cp.id_cooling_system = cs.id
+		LEFT JOIN cart c ON c.id_user = $2
+		LEFT JOIN cart_pc cpc ON cpc.id_cart = c.id AND cpc.id_config = cp.id
 		WHERE cp.id = $1
 	`
 
 	for index, value := range pc_id { // Перебор входного массива
 		g.Go(func() error {
-			pc, err := r.GetPCByID(ctx, value, sql) // Вызов йункции для получения характеристик
+			pc, err := r.GetPCByID(ctx, value, sql, user_id) // Вызов йункции для получения характеристик
 			if err != nil {
 				return err
 			}

@@ -91,7 +91,7 @@ func main() {
 	r.Post("/api/cart/config/add", _handler.AddConfigToCart)    // добавление кастомной сборки в корзину
 	r.Get("/api/verify_token", _handler.IsTokenValid)           // проверка токена для смены пароля
 	r.Post("/api/reset_password", _handler.ResetPassword)       // запрос на смену пароля
-	r.Get("/api/comparison/get_pc", _handler.GetComponentsPC)
+	r.Post("/api/comparison/get_pc", _handler.GetComponentsPC)
 
 	if err := http.ListenAndServe(":3000", r); err != nil {
 		logger.Log.Warn(err.Error())

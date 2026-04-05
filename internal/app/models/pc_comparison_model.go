@@ -4,6 +4,7 @@ type PC_model struct {
 	ID_Config      int
 	Name           string
 	Photo          string
+	Price          float32
 	Processor      Processor_Comparison_Model
 	Motherboard    Motherboard_Comparison_Model
 	GPU            Video_Card_Comparison_Model
@@ -14,6 +15,7 @@ type PC_model struct {
 	Power_Unit     Power_Unit_Comparison_Model
 	Frame          Frame_Comparison_Model
 	Cooling_System Cooling_System_Comparison_Models
+	In_Cart        bool `json:"in_cart"`
 }
 
 type Ram_Slot struct {
