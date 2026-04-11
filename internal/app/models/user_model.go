@@ -16,3 +16,7 @@ type User struct {
 	Created_at  time.Time `json:"created_at"`
 	PickUpPoint *string   `json:"pick_up_point"`
 }
+
+type ResponseUpdatePhoneModel struct {
+	Phone string `json:"phone"`
+}

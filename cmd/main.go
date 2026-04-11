@@ -86,12 +86,14 @@ func main() {
 	r.Get("/api/components", _handler.Components)               // получение всех компонентов для конфигуратора
 	r.Post("/api/cart/add", _handler.AddCart)                   // добавляет товар в корзину
 	r.Post("/api/cart/update", _handler.UpdateCartItemQuantity) // увеличивает или уменьшает количество товара в корзине
-	r.Post("/api/cart/remove", _handler.RemoveFromCart)         // удаляет товар из корзины
+	r.Post("/api/cart/remove", _handler.RemoveFromCart)         // удаляет товар из корзины/api/comparison/get_pc
 	r.Get("/api/cart/items", _handler.Cart_Items)               // получение всех товаров из корзины пользователя
 	r.Post("/api/cart/config/add", _handler.AddConfigToCart)    // добавление кастомной сборки в корзину
 	r.Get("/api/verify_token", _handler.IsTokenValid)           // проверка токена для смены пароля
 	r.Post("/api/reset_password", _handler.ResetPassword)       // запрос на смену пароля
 	r.Post("/api/comparison/get_pc", _handler.GetComponentsPC)
+	r.Post("/api/user/update/phone", _handler.UpdatePhoneNumber)
+	r.Get("/api/check_auth", _handler.CheckAuth)
 
 	if err := http.ListenAndServe(":3000", r); err != nil {
 		logger.Log.Warn(err.Error())

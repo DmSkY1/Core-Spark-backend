@@ -343,6 +343,22 @@ func (h *handler_struct) Register(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (h *handler_struct) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
+	var phone_response models.ResponseUpdatePhoneModel
+	json.NewDecoder(r.Body).Decode(&phone_response)
+	defer r.Body.Close()
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := h.serv.UpdatePhone(user_id, phone_response.Phone); err != nil {
+		http.Error(w, "Incorrect data", http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (h *handler_struct) GetComponentsPC(w http.ResponseWriter, r *http.Request) {
 	var id models.Comparison_Request_Model
 
@@ -367,6 +383,15 @@ func (h *handler_struct) GetComponentsPC(w http.ResponseWriter, r *http.Request)
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(pc)
+}
+
+func (h *handler_struct) CheckAuth(w http.ResponseWriter, r *http.Request) {
+	_, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	w.WriteHeader(200)
 }
 
 func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {

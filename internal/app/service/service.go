@@ -14,6 +14,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -62,6 +63,7 @@ type Serv interface {
 	SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error)
 	SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error)
 	GettingPCForComparisonService(pc_id []int, user_id int) (*[]models.PC_model, error)
+	UpdatePhone(id int, phone_number string) error
 }
 
 func NewService(repo repository.Repo, email_sender email.SMPTSender) Serv {
@@ -178,6 +180,21 @@ func (s *service_struct) GettingPCForComparisonService(pc_id []int, user_id int)
 	}
 
 	return pc, nil
+}
+
+func (s *service_struct) UpdatePhone(id int, phone_number string) error {
+
+	matched, _ := regexp.MatchString("^7[0-9]{10}$", phone_number)
+	if !matched {
+		return errors.New("Incorrect phone number")
+	}
+
+	err := s.repo.AddPhoneUser(id, phone_number)
+	if err != nil {
+		fmt.Println("тут прикоол", err)
+		return err
+	}
+	return nil
 }
 
 func (s *service_struct) GetComponents() (*models.Components, error) {

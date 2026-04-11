@@ -49,6 +49,7 @@ type Repo interface {
 	SearchItemsAuthUser(ram, gpu, cpu, category []string, price, search_string string, id, page, limit int, order string) ([]models.Response_For_AuthUser_Model, error)
 	AddCustomConfigToCart(id int, config models.User_Config_Model) (err error)
 	GettingPCForComparison(pc_id []int, user_id int) (*[]models.PC_model, error)
+	AddPhoneUser(id int, number_phone string) error
 }
 
 func NewRepository(db *pgxpool.Pool) Repo {
@@ -441,15 +442,22 @@ func (r *repository_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID
 	session_uuid := uuid.New()
 	if _, err := r.db.Exec(
 		context.Background(),
-		`INSERT INTO sessions (uuid, id_user, user_agent, created_at, expires_at, is_active) VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO sessions (uuid, id_user, user_agent, created_at, expires_at, is_active, device_id) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (id_user, device_id) DO UPDATE SET
+			uuid = EXCLUDED.uuid,             
+    		user_agent = EXCLUDED.user_agent, 
+    		created_at = EXCLUDED.created_at,  
+    		expires_at = EXCLUDED.expires_at, 
+    		is_active = TRUE; `,
 		session_uuid,
 		user.ID,
 		login_data.User_Agent,
 		time.Now().UTC(),
 		time.Now().Add(time.Hour*336).UTC(),
 		true,
+		login_data.Device_Id,
 	); err != nil {
-		logger.Log.Info(err.Error())
 		return uuid.Nil, 0, err
 	}
 
@@ -519,7 +527,7 @@ func buildFilterCondition(start_arg_num int, ram, gpu, cpu, category []string, p
 	if len(cpu) != 0 {
 		placehold := make([]string, 0, len(cpu))
 		for i := range cpu {
-			placehold = append(placehold, fmt.Sprintf("p.manufacturer ILIKE $%d", args_num))
+			placehold = append(placehold, fmt.Sprintf("p.product_line ILIKE $%d", args_num))
 			args = append(args, "%"+cpu[i]+"%")
 			args_num++
 		}
@@ -1182,6 +1190,14 @@ func (r *repository_struct) GettingPCForComparison(pc_id []int, user_id int) (*[
 	}
 
 	return &pc_comparison, nil
+}
+
+func (r *repository_struct) AddPhoneUser(id int, number_phone string) error {
+	_, err := r.db.Exec(context.Background(), `UPDATE users SET telephone = $1 WHERE id = $2 `, number_phone, id)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *repository_struct) AddCustomConfigToCart(id int, config models.User_Config_Model) (err error) {
