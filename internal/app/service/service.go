@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -64,6 +65,15 @@ type Serv interface {
 	SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error)
 	GettingPCForComparisonService(pc_id []int, user_id int) (*[]models.PC_model, error)
 	UpdatePhone(id int, phone_number string) error
+	LogOut(id int, session string) error
+	GetPickUpPoints(id int) (*[]models.PickUpPoint_Model, error)
+	SavePickUpPoint(user_id, pick_up_point_id int) error
+	GetAccountDashboardService(id int) (*models.AccountDashboard, error)
+	GetAllOrdersService(id int) (*[]models.Order, error)
+	GetInfoOrderService(id int, order_code string) (*[]models.Order_Items, error)
+	AddOrderService(id, pick_up_point_id int) error
+	ChangePasswordProfileService(id int, old_password, new_password string) error
+	ChangeUserDataService(id int, name, surname string, phone string) error
 }
 
 func NewService(repo repository.Repo, email_sender email.SMPTSender) Serv {
@@ -137,7 +147,7 @@ func (s *service_struct) AvatarCheck(files []*multipart.FileHeader, id int) erro
 
 	uuid_photo := uuid.New().String() + ext // генерация имени файла
 
-	save_photo, err := os.Create(filepath.Join("/home/dmsky/", uuid_photo)) // создание файла пустышки
+	save_photo, err := os.Create(filepath.Join("/app/uploads/", uuid_photo)) // создание файла пустышки
 	if err != nil {
 		return errors.New("error creating file")
 	}
@@ -161,6 +171,24 @@ func (s *service_struct) AddCustomConfigToCartService(id int, config models.User
 		return err
 	}
 	return nil
+}
+
+func (s *service_struct) SavePickUpPoint(user_id, pick_up_point_id int) error {
+	if user_id <= 0 {
+		return fmt.Errorf("Invalid ID")
+	}
+	if err := s.repo.SavePickUpPointUser(user_id, pick_up_point_id); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *service_struct) GetPickUpPoints(id int) (*[]models.PickUpPoint_Model, error) {
+	req, err := s.repo.GetAllPickUpPoints(id)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
 func (s *service_struct) GettingPCForComparisonService(pc_id []int, user_id int) (*[]models.PC_model, error) {
@@ -192,6 +220,14 @@ func (s *service_struct) UpdatePhone(id int, phone_number string) error {
 	err := s.repo.AddPhoneUser(id, phone_number)
 	if err != nil {
 		fmt.Println("тут прикоол", err)
+		return err
+	}
+	return nil
+}
+
+func (s *service_struct) LogOut(id int, session string) error {
+	// TODO сделать базовую просерку на то тчо id не ноль и т.д.
+	if err := s.repo.LogOutProfile(id, session); err != nil {
 		return err
 	}
 	return nil
@@ -232,6 +268,32 @@ func (s *service_struct) SearchAuthUserService(ram, gpu, cpu, category []string,
 		return nil, err
 	}
 	return req, nil
+}
+
+func (s *service_struct) GetAccountDashboardService(id int) (*models.AccountDashboard, error) {
+	req, err := s.repo.GetAccountDashboard(id)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (s *service_struct) GetAllOrdersService(id int) (*[]models.Order, error) {
+	req, err := s.repo.GetAllOrders(id)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (s *service_struct) GetInfoOrderService(id int, order_code string) (*[]models.Order_Items, error) {
+
+	req, err := s.repo.GetInfoOrder(id, order_code)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+
 }
 
 func (s *service_struct) SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error) {
@@ -317,6 +379,15 @@ func (s *service_struct) CartItemsService(user_id int) ([]models.Cart_Item, erro
 	return req, nil
 }
 
+func (s *service_struct) AddOrderService(id, pick_up_point_id int) error {
+	order_code := uuid.New()
+	err := s.repo.AddOrder(id, pick_up_point_id, "CP-"+order_code.String()[1:11])
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *service_struct) RemoveFromCartService(id, config_id int) error {
 	err := s.repo.RemoveFromCart(id, config_id)
 	if err != nil {
@@ -400,6 +471,33 @@ func (s *service_struct) DelSession(session string) error {
 
 func (s *service_struct) UpadateExpiresSession(session string) error {
 	return s.repo.UpdateExpiresAtSession(session)
+}
+
+func (s *service_struct) ChangePasswordProfileService(id int, old_password, new_password string) error {
+	if old_password != new_password {
+		if err := s.repo.ChangePasswordProfile(id, new_password, old_password); err != nil {
+			return err
+		}
+		return nil
+	}
+	return errors.New("The password must match the current one")
+}
+
+func (s *service_struct) ChangeUserDataService(id int, name, surname string, phone string) error {
+	matched, _ := regexp.MatchString("^7[0-9]{10}$", phone)
+	if !matched {
+		return errors.New("Incorrect phone number")
+	}
+
+	if utf8.RuneCountInString(name) > 15 || utf8.RuneCountInString(surname) > 15 {
+		return errors.New("The first or last name exceeds the number of characters")
+	}
+
+	if err := s.repo.ChangeUserData(id, name, surname, phone); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *service_struct) ReqPasswordReset(email string) error { // Запрос на изменение пароля, с отправкой ссылки на почту

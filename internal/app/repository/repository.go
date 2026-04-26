@@ -50,6 +50,14 @@ type Repo interface {
 	AddCustomConfigToCart(id int, config models.User_Config_Model) (err error)
 	GettingPCForComparison(pc_id []int, user_id int) (*[]models.PC_model, error)
 	AddPhoneUser(id int, number_phone string) error
+	LogOutProfile(id int, session string) error
+	GetAllPickUpPoints(id int) (*[]models.PickUpPoint_Model, error)
+	SavePickUpPointUser(user_id, pick_up_point_id int) error
+	GetAccountDashboard(id int) (*models.AccountDashboard, error)
+	GetAllOrders(id int) (*[]models.Order, error)
+	GetInfoOrder(id int, order_code string) (*[]models.Order_Items, error)
+	AddOrder(id, pick_up_point_id int, order_code string) (err error)
+	ChangeUserData(id int, name, surname string, phone string) error
 }
 
 func NewRepository(db *pgxpool.Pool) Repo {
@@ -620,6 +628,14 @@ func (r *repository_struct) LoadCatalogAuthUser(page, limit, id int, order strin
 	return items, nil
 }
 
+func (r *repository_struct) LogOutProfile(id int, session string) error {
+	_, err := r.db.Exec(context.Background(), `UPDATE sessions SET is_active = false WHERE id_user = $1 AND uuid = $2`, id, session)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *repository_struct) LoadCatalogGuest(page, limit, id int, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_Guests_Model, error) { // Загрузка каталога для гостя
 
 	// TODO Сократить код, вынести большинство повторяющегося кода в отдельные функции
@@ -734,6 +750,49 @@ func (r *repository_struct) GetUserById(id int) (*models.User, error) { // По�
 	return user, nil
 }
 
+func (r *repository_struct) GetAllPickUpPoints(id int) (*[]models.PickUpPoint_Model, error) {
+	var items []models.PickUpPoint_Model
+	req, err := r.db.Query(
+		context.Background(), `
+		SELECT
+			p.id,
+			p.name,
+			p.address,
+			p.opening_hours,
+			(SELECT pick_up_point_id FROM users WHERE id = $1) AS default_point
+		FROM pick_up_point p
+		ORDER BY p.id ASC`,
+		id,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for req.Next() {
+		var item models.PickUpPoint_Model
+		err := req.Scan(
+			&item.ID,
+			&item.Name,
+			&item.Address,
+			&item.OpeningHours,
+			&item.DefaultPoint,
+		)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return &items, nil
+}
+
+func (r *repository_struct) SavePickUpPointUser(user_id, pick_up_point_id int) error {
+	_, err := r.db.Exec(context.Background(), `UPDATE users SET pick_up_point_id = $1 WHERE id = $2`, pick_up_point_id, user_id)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *repository_struct) GetUserByEmail(email string) (*models.User, error) { // Получение данных пользователя по почте
 	user := new(models.User) // Модель для хранения данных пользователя
 	err := r.db.QueryRow(context.Background(),
@@ -778,12 +837,20 @@ func (r *repository_struct) ResetPasswordRepository(password string, id int) err
 	return nil
 }
 
+func (r *repository_struct) ChangeUserData(id int, name, surname string, phone string) error {
+	_, err := r.db.Exec(context.Background(), "UPDATE users SET name = $1, surname = $2, telephone = $3 WHERE id = $4", name, surname, phone, id)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *repository_struct) ChangePasswordProfile(id int, new_password, old_password string) error { // Смена пароля из профиля
 
 	var get_old_password string
 	if err := r.db.QueryRow(
 		context.Background(),
-		`SELECT password FROM users where id = $1`,
+		`SELECT password FROM users WHERE id = $1`,
 		id,
 	).Scan(&get_old_password); err != nil {
 		return err
@@ -805,7 +872,7 @@ func (r *repository_struct) ChangePasswordProfile(id int, new_password, old_pass
 	if err != nil {
 		return err
 	}
-	return nil // TODO этот метод еще не совсем корректный, в будущем надо его доделать
+	return nil
 }
 
 func (r *repository_struct) DeleteSession(session string) error {
@@ -1391,6 +1458,195 @@ func (r *repository_struct) AddCustomConfigToCart(id int, config models.User_Con
 	return nil
 }
 
+func (r *repository_struct) GetAllOrders(id int) (*[]models.Order, error) {
+	var items []models.Order
+	rows, err := r.db.Query(
+		context.Background(),
+		`SELECT o.id, o.order_code, s.name, o.date, o.sum FROM "order" o
+		JOIN status_order s ON o.id_status = s.id
+		WHERE id_user = $1
+		ORDER BY date`,
+		id,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var item models.Order
+		err := rows.Scan(
+			&item.ID,
+			&item.Order_code,
+			&item.Status,
+			&item.Date,
+			&item.Sum,
+		)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return &items, nil
+}
+
+func (r *repository_struct) AddOrder(id, pick_up_point_id int, order_code string) (err error) {
+	var order_id int
+	ctx := context.Background()
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	err = tx.QueryRow(
+		ctx,
+		`WITH cartid AS (
+			SELECT id FROM cart WHERE id_user = $1
+		),
+		cart_total AS (
+    		SELECT COALESCE(SUM(con.price * c.quantity), 0) as total_sum
+    		FROM cart_pc c
+    		JOIN config_pc con ON c.id_config = con.id
+    		WHERE c.id_cart = (SELECT id FROM cartid)
+		)
+		INSERT INTO "order" (order_code, id_status, id_user, date, sum, pick_up_point_id)
+		VALUES ($2, $3, $1, NOW(), (SELECT total_sum FROM cart_total), $4) RETURNING id;`,
+		id,
+		order_code,
+		1,
+		pick_up_point_id,
+	).Scan(&order_id)
+
+	_, err = tx.Exec(
+		ctx,
+		`INSERT INTO order_items (id_order, id_config, quantity, price)
+		SELECT $1,
+		c.id_config,
+		c.quantity,
+		con.price
+		FROM cart_pc c
+		JOIN config_pc con ON c.id_config = con.id
+		WHERE c.id_cart = (SELECT id FROM cart WHERE id_user = $2)
+		`,
+		order_id,
+		id,
+	)
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+func (r *repository_struct) GetInfoOrder(id int, order_code string) (*[]models.Order_Items, error) {
+	var result []models.Order_Items
+	rows, err := r.db.Query(
+		context.Background(),
+		`SELECT c.photo, c.name, c.price, oi.quantity, o.sum, o.date FROM order_items oi
+		JOIN "order" o ON oi.id_order = o.id
+		JOIN config_pc c ON oi.id_config = c.id
+		JOIN users u ON o.id_user = u.id
+		WHERE u.id = $1 AND o.order_code = $2`,
+		id, order_code,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var item models.Order_Items
+		err := rows.Scan(
+			&item.Photo,
+			&item.Name,
+			&item.Price,
+			&item.Quantity,
+			&item.Sum,
+			&item.Date,
+		)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return &result, nil
+}
+
+func (r *repository_struct) GetAccountDashboard(id int) (*models.AccountDashboard, error) {
+	var result models.AccountDashboard
+	var items []models.Order
+
+	g, ctx := errgroup.WithContext(context.Background())
+
+	g.Go(func() error {
+		rows, err := r.db.Query(
+			context.Background(),
+			`SELECT o.id, o.order_code, s.name, o.date, o.sum FROM "order" o
+		JOIN status_order s ON o.id_status = s.id
+		WHERE id_user = $1
+		ORDER BY date LIMIT 5;`,
+			id,
+		)
+		if err != nil {
+			return err
+		}
+
+		for rows.Next() {
+			var item models.Order
+			err := rows.Scan(
+				&item.ID,
+				&item.Order_code,
+				&item.Status,
+				&item.Date,
+				&item.Sum,
+			)
+			if err != nil {
+				return err
+			}
+			items = append(items, item)
+		}
+		result.Last_Orders = items
+		return nil
+	})
+
+	g.Go(func() error {
+		err := r.db.QueryRow(
+			ctx,
+			`SELECT 
+    	COUNT(o.id) as total_orders,
+    	u.created_at as registration_date,
+    	COALESCE(SUM(o.sum), 0) as total_spent
+		FROM users u
+		LEFT JOIN "order" o ON o.id_user = u.id
+		WHERE u.id = $1
+		GROUP BY u.id, u.created_at;
+		`,
+			id,
+		).Scan(
+			&result.Total_Orders,
+			&result.RegisterdAt,
+			&result.Total_Spent,
+		)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
 func (r *repository_struct) UpdateCartItemQuantity(user_id, config_id, num int) (err error) {
 	var cart_id int
 	ctx := context.Background()
@@ -1558,7 +1814,7 @@ func (r *repository_struct) GetUserProfile(id int) (*models.Profile_Model, error
 		u.avatar,
 		u.role,
 		u.created_at,
-		u.pick_up_point,
+		u.pick_up_point_id,
     	(SELECT COUNT(*)
      		   FROM cart c
      		   JOIN cart_pc cp ON c.id = cp.id_cart
@@ -1573,7 +1829,7 @@ func (r *repository_struct) GetUserProfile(id int) (*models.Profile_Model, error
 		&user.Avatar,
 		&user.Role,
 		&user.Created_at,
-		&user.Pick_up_point,
+		&user.Pick_up_point_ID,
 		&user.CartItemsCount,
 	)
 	if err != nil {

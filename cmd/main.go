@@ -94,6 +94,15 @@ func main() {
 	r.Post("/api/comparison/get_pc", _handler.GetComponentsPC)
 	r.Post("/api/user/update/phone", _handler.UpdatePhoneNumber)
 	r.Get("/api/check_auth", _handler.CheckAuth)
+	r.Get("/api/logout", _handler.LogOutUser)
+	r.Get("/api/get_points", _handler.GetPickUpPoints)
+	r.Post("/api/save_point", _handler.SavePickUpPointUser)
+	r.Get("/api/account_dashboard", _handler.GetAccountDashboard)
+	r.Get("/api/get_all_orders", _handler.GetAllOrders)
+	r.Post("/api/get_info_order", _handler.GetInfoOrder)
+	r.Post("/api/new_order", _handler.AddOrder)
+	r.Post("/api/change_password_profile", _handler.ChangePasswordProfile)
+	r.Post("/api/change_user_data", _handler.ChangeUserData)
 
 	if err := http.ListenAndServe(":3000", r); err != nil {
 		logger.Log.Warn(err.Error())

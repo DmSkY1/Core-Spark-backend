@@ -28,5 +28,5 @@ type Response_For_AuthUser_Model struct {
 	In_Cart          bool    `json:"in_cart"`
 	Price            float32 `json:"price"`
 	Total_count      int     `json:"total_count"`
-	Article          string  `json:"article"`
+	Article          *string `json:"article"`
 }

@@ -149,6 +149,7 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 			normalizeToStringSlice(cpu),
 		) // Жеская передача 9, заключается в особой ненадобности регулировать лимит пользователем, поэтому задано фиксированное число
 		if err != nil {
+			fmt.Print(err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -169,6 +170,7 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 			normalizeToStringSlice(cpu),
 		)
 		if err != nil {
+			fmt.Print(err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -179,13 +181,107 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *handler_struct) GetAccountDashboard(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	req, err := h.serv.GetAccountDashboardService(user_id)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(req)
+}
+
+func (h *handler_struct) GetAllOrders(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	req, err := h.serv.GetAllOrdersService(user_id)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(req)
+}
+
+func (h *handler_struct) ChangeUserData(w http.ResponseWriter, r *http.Request) {
+	var user_data models.Response_Change_Data
+	json.NewDecoder(r.Body).Decode(&user_data)
+	defer r.Body.Close()
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.serv.ChangeUserDataService(user_id, user_data.Name, user_data.Surname, user_data.Phone); err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "Unauthorized", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(200)
+}
+
+func (h *handler_struct) ChangePasswordProfile(w http.ResponseWriter, r *http.Request) {
+	var get_passwords models.Response_Change_Password
+	json.NewDecoder(r.Body).Decode(&get_passwords)
+	defer r.Body.Close()
+	fmt.Println(get_passwords.Old_Password)
+	fmt.Println(get_passwords.New_Password)
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.serv.ChangePasswordProfileService(user_id, get_passwords.Old_Password, get_passwords.New_Password); err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "Unauthorized", http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.WriteHeader(200)
+}
+
+func (h *handler_struct) GetInfoOrder(w http.ResponseWriter, r *http.Request) {
+	var req_info_order models.Request_Order_Info
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	json.NewDecoder(r.Body).Decode(&req_info_order)
+	defer r.Body.Close()
+
+	req, err := h.serv.GetInfoOrderService(user_id, req_info_order.Order_code)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(req)
+}
+
 func (h *handler_struct) AddCart(w http.ResponseWriter, r *http.Request) {
 	user_id, ok := r.Context().Value("user_id").(int)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
 	}
 	var add_cartModel models.Universal_Model_Cart
 	json.NewDecoder(r.Body).Decode(&add_cartModel)
+	defer r.Body.Close()
 
 	err := h.serv.AddCartService(user_id, add_cartModel.ID_Config)
 	if err != nil {
@@ -203,6 +299,7 @@ func (h *handler_struct) RemoveFromCart(w http.ResponseWriter, r *http.Request) 
 
 	var remove_model models.Universal_Model_Cart
 	json.NewDecoder(r.Body).Decode(&remove_model)
+	defer r.Body.Close()
 
 	err := h.serv.RemoveFromCartService(user_id, remove_model.ID_Config)
 	if err != nil {
@@ -216,6 +313,7 @@ func (h *handler_struct) Cart_Items(w http.ResponseWriter, r *http.Request) {
 	user_id, ok := r.Context().Value("user_id").(int)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
 	}
 
 	req, err := h.serv.CartItemsService(user_id)
@@ -228,9 +326,59 @@ func (h *handler_struct) Cart_Items(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(req)
 }
 
+func (h *handler_struct) AddOrder(w http.ResponseWriter, r *http.Request) {
+	var pickUpPoint models.Pick_Up_Point_Order
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	json.NewDecoder(r.Body).Decode(&pickUpPoint)
+	defer r.Body.Close()
+
+	err := h.serv.AddOrderService(user_id, pickUpPoint.Pick_Up_Point_ID)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(200)
+}
+
+func (h *handler_struct) LogOutUser(w http.ResponseWriter, r *http.Request) {
+	// TODO сделать нормальное логирование
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	session, err := r.Cookie("session_id")
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	key := fmt.Sprintf("session:%s", session.Value)
+
+	err = h.serv.LogOut(user_id, session.Value)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	DelCookie(w)
+
+	h.red.Del(context.Background(), key)
+	w.WriteHeader(200)
+}
+
 func (h *handler_struct) UpdateCartItemQuantity(w http.ResponseWriter, r *http.Request) {
 	var res models.Update_Cart_Items_Quantity
 	json.NewDecoder(r.Body).Decode(&res)
+	defer r.Body.Close()
 
 	user_id, ok := r.Context().Value("user_id").(int)
 	if !ok {
@@ -238,10 +386,46 @@ func (h *handler_struct) UpdateCartItemQuantity(w http.ResponseWriter, r *http.R
 	}
 
 	if err := h.serv.UpdateCartItemQuantityService(user_id, res.ID_config, res.Num); err != nil {
+		logger.Log.Error(err.Error())
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *handler_struct) SavePickUpPointUser(w http.ResponseWriter, r *http.Request) {
+	var pick_up_point_id models.Response_Pick_Up_Point
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	json.NewDecoder(r.Body).Decode(&pick_up_point_id)
+	defer r.Body.Close()
+
+	if err := h.serv.SavePickUpPoint(user_id, pick_up_point_id.ID); err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(200)
+}
+
+func (h *handler_struct) GetPickUpPoints(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	req, err := h.serv.GetPickUpPoints(user_id)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(req)
 }
 
 func (h *handler_struct) AddConfigToCart(w http.ResponseWriter, r *http.Request) {
@@ -251,9 +435,10 @@ func (h *handler_struct) AddConfigToCart(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	}
 	json.NewDecoder(r.Body).Decode(&config)
+	defer r.Body.Close()
 
 	if err := h.serv.AddCustomConfigToCartService(user_id, config); err != nil {
-		//logger.Log.Info(err.Error())
+		logger.Log.Error(err.Error())
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -285,6 +470,7 @@ func (h *handler_struct) RequestPasswordReset(w http.ResponseWriter, r *http.Req
 	}
 	user_mail := new(Email)
 	json.NewDecoder(r.Body).Decode(user_mail)
+	defer r.Body.Close()
 
 	go func() {
 		err := h.serv.ReqPasswordReset(user_mail.Email)
@@ -404,6 +590,7 @@ func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {
 
 	userSession_uuid, user_id, err := h.serv.LoginUser(userLogin)
 	if err != nil {
+		logger.Log.Error(err.Error())
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -565,6 +752,7 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 				next.ServeHTTP(w, r)
 				return
 			}
+			// Проверка валидно ли время жизни сессии. Если нынешнее время до истеения сесии- то все гуд, иначе удаление куки и запимей с сессией
 			if session_value.Expires_at.Before(time.Now()) {
 				DelCookie(w)
 				if err := h.serv.DelSession(sessionCookie.Value); err != nil {
@@ -574,9 +762,10 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 				next.ServeHTTP(w, r)
 				return
 			}
+			// Это сделано для того чтобы каждый запрос не обновлять время жизни, а обновлять тогда, когда подходит крайний срок
 			if int(time.Until(session_value.Expires_at.UTC()).Hours()/24) <= 7 { // сессия не должна быть меньше 7 дней, иначе обновление срока жизни
 				if err := h.serv.UpadateExpiresSession(sessionCookie.Value); err != nil {
-
+					//??сделать надо
 				}
 				session_value.Expires_at = time.Now().UTC().Add(720 * time.Hour)
 				update_session, err := json.Marshal(session_value)

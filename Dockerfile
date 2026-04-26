@@ -1,9 +1,22 @@
-FROM golang:1.24-bookworm
+#1 этап  
+FROM golang:1.26.1 AS builder
 
 WORKDIR /app
 
 COPY . .
 
-RUN go mod tidy
+RUN go mod tidy && go build -o app ./cmd/main.go
 
-CMD ["make", "app_run"]
+#2 этап финальный
+FROM alpine:latest
+# не знаю на сколько сильно это потребуется
+RUN apk --no-cache add ca-certificates 
+
+WORKDIR /app
+
+COPY --from=builder /app/app .
+
+RUN mkdir -p /app/uploads/
+
+CMD ["./app"]
+
