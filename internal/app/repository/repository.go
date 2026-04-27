@@ -462,7 +462,7 @@ func (r *repository_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID
 		user.ID,
 		login_data.User_Agent,
 		time.Now().UTC(),
-		time.Now().Add(time.Hour*336).UTC(),
+		time.Now().Add(time.Hour*720).UTC(),
 		true,
 		login_data.Device_Id,
 	); err != nil {

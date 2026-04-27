@@ -10,7 +10,6 @@ import (
 	"gobackend/internal/app/service"
 	"gobackend/pkg/logger"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -460,10 +459,6 @@ func (h *handler_struct) GetProfile(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(user_profile)
 }
 
-func (h *handler_struct) Cart(w http.ResponseWriter, r *http.Request) {
-	// TODO доделать
-}
-
 func (h *handler_struct) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	type Email struct {
 		Email string `json:"email"`
@@ -483,22 +478,20 @@ func (h *handler_struct) RequestPasswordReset(w http.ResponseWriter, r *http.Req
 }
 
 func (h *handler_struct) Components(w http.ResponseWriter, r *http.Request) {
+	var items *models.Components
 	data, err := h.red.Get(context.Background(), "configurator:components").Bytes()
 	if err != nil {
 		logger.Log.Error(err.Error())
+		items, err = h.serv.GetComponents()
+		if err != nil {
+			logger.Log.Error(err.Error())
+			return
+		}
 	}
-	var items models.Components
-
-	if err := msgpack.Unmarshal(data, &items); err != nil {
+	if err := msgpack.Unmarshal(data, items); err != nil {
 		logger.Log.Error(err.Error())
 	}
 
-	// TODO дописать в случае, если в редис ничего нет, то обращаться в бд
-	//items, err := h.serv.GetComponents()
-	//if err != nil {
-	//	fmt.Println(err)
-	//	return
-	//}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(items)
 }
@@ -588,7 +581,7 @@ func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	userSession_uuid, user_id, err := h.serv.LoginUser(userLogin)
+	userSession_uuid, _, err := h.serv.LoginUser(userLogin)
 	if err != nil {
 		logger.Log.Error(err.Error())
 		return
@@ -598,16 +591,9 @@ func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    userSession_uuid.String(),
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // TODO в финале изменить на true
-		Expires:  time.Now().Add(1 * time.Hour),
-		MaxAge:   3600,
+		Secure:   true,
+		Expires:  time.Now().Add(720 * time.Hour),
 	})
-	data, err := msgpack.Marshal(userSession_uuid)
-	if err != nil {
-		logger.Log.Error(err.Error())
-	}
-	h.red.Set(context.Background(), fmt.Sprintf("session:%s", data), userSession_uuid, 12*time.Hour)
-	h.red.SAdd(context.Background(), fmt.Sprintf("user:%s", strconv.Itoa(user_id)), userSession_uuid)
 
 	w.WriteHeader(200)
 }
@@ -735,7 +721,9 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 				return
 			}
 
-			if err := h.red.Set(context.Background(), key, data, 12*time.Hour).Err(); err != nil { // добавление записи сессии в редис
+			if err := h.red.Set(context.Background(), key, data, 12*time.Hour).Err(); err != nil {
+				logger.Log.Error(err.Error())
+				return
 			}
 		} else if err != nil {
 			next.ServeHTTP(w, r)
@@ -756,23 +744,14 @@ func (h *handler_struct) SessionCheckMiddleware(next http.Handler) http.Handler 
 			if session_value.Expires_at.Before(time.Now()) {
 				DelCookie(w)
 				if err := h.serv.DelSession(sessionCookie.Value); err != nil {
-					// TODO возвращать нормальные ошибки и логировать
+					logger.Log.Error(err.Error())
+					return
 				}
 				h.red.Del(context.Background(), key).Result()
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Это сделано для того чтобы каждый запрос не обновлять время жизни, а обновлять тогда, когда подходит крайний срок
-			if int(time.Until(session_value.Expires_at.UTC()).Hours()/24) <= 7 { // сессия не должна быть меньше 7 дней, иначе обновление срока жизни
-				if err := h.serv.UpadateExpiresSession(sessionCookie.Value); err != nil {
-					//??сделать надо
-				}
-				session_value.Expires_at = time.Now().UTC().Add(720 * time.Hour)
-				update_session, err := json.Marshal(session_value)
-				if err == nil {
-					h.red.Set(context.Background(), key, update_session, 12*time.Hour)
-				}
-			}
+
 			user_id = session_value.User_id
 		}
 		ctx := context.WithValue(r.Context(), "user_id", user_id) // Возвращаем id пользователя через контекст

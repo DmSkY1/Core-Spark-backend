@@ -1,0 +1,55 @@
+services:
+
+  app:
+    container_name: app_container
+    build: .
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - /var/www/i.core-spark/images/avatar/:/app/uploads/
+    ports:
+      - "8080:8080"
+    networks:
+      - app-networks
+    restart: unless-stopped
+
+  database:
+    container_name: database_container
+    image: postgres:15-alpine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pguser -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-networks
+    restart: unless-stopped
+
+
+
+  redis:
+    container_name: redis_container
+    image: valkey/valkey:7-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "123", "--user", "test", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-networks
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-networks:
+    driver: bridge

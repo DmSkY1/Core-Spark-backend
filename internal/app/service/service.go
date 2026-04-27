@@ -455,11 +455,14 @@ func (s *service_struct) ResetPasswordService(id int, password string) error {
 }
 
 func (s *service_struct) VerifySession(session string) (*models.Session_Check_Model, error) {
-	req, err := s.repo.CheckSession(session) // Сделать проверку срока годности токенаЫ
+	req, err := s.repo.CheckSession(session) // Сделать проверку срока годности токена
 	if err != nil {
 		return nil, err
 	}
 	if req.Expires_at.Before(time.Now()) {
+		return nil, errors.New("Session is not valid")
+	}
+	if !req.Is_active {
 		return nil, errors.New("Session is not valid")
 	}
 	return req, nil
