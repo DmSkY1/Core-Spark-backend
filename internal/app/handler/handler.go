@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/vmihailenco/msgpack/v5"
 	"go.uber.org/zap"
@@ -68,6 +69,21 @@ func (h *handler_struct) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *handler_struct) CheckConfigByArticle(w http.ResponseWriter, r *http.Request) {
+	article := chi.URLParam(r, "article")
+	req, err := h.serv.CheckConfigByArticleService(article)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if !req {
+		http.Error(w, "Article not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()        // получение query параметров
 	order := query.Get("order")   // параметр для cортировки
@@ -94,7 +110,6 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 			normalizeToStringSlice(cpu),
 		) // Жеская передача 9, заключается в особой ненадобности регулировать лимит пользователем, поэтому задано фиксированное число
 		if err != nil {
-			fmt.Print(err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -283,13 +298,15 @@ func (h *handler_struct) AddOrder(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&pickUpPoint)
 	defer r.Body.Close()
 
-	err := h.serv.AddOrderService(user_id, pickUpPoint.Pick_Up_Point_ID)
+	code, err := h.serv.AddOrderService(user_id, pickUpPoint.Pick_Up_Point_ID)
 	if err != nil {
 		logger.Log.Error(err.Error())
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-
+	json.NewEncoder(w).Encode(map[string]string{
+		"order_code": code,
+	})
 	w.WriteHeader(200)
 }
 
@@ -481,6 +498,23 @@ func (h *handler_struct) UpdatePhoneNumber(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Incorrect data", http.StatusBadRequest)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *handler_struct) GetProductInfo(w http.ResponseWriter, r *http.Request) {
+	user_id, ok := r.Context().Value("user_id").(int)
+	if !ok {
+		user_id = 0
+	}
+
+	article := r.URL.Query().Get("article")
+
+	req, err := h.serv.GetProductInfoService(article, user_id)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(&req)
 	w.WriteHeader(http.StatusOK)
 }
 

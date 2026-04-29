@@ -74,23 +74,23 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(_handler.RateLimiterMiddleware(100, 130))
-	r.Use(middleware.Logger)                                    // TODO заменить в будущем на другой логер
-	r.Use(_handler.SessionCheckMiddleware)                      // Для проверки сессии на работоспособность
-	r.Post("/register", _handler.Register)                      // Регистариция пользователя
-	r.Post("/login", _handler.Login)                            // авторизация пользователя
-	r.Post("/forgot_password", _handler.RequestPasswordReset)   // смена пароля, отправка письма на почту
-	r.Get("/api/catalog", _handler.Catalog)                     // получение товаров для каталога
-	r.Get("/api/catalog/search", _handler.Catalog)              // поиск в каталоге
-	r.Get("/api/user/profile", _handler.GetProfile)             // получение профиля пользователя
-	r.Post("/api/user/upload_avatar", _handler.UploadAvatar)    // загрузка аватара пользователя
-	r.Get("/api/components", _handler.Components)               // получение всех компонентов для конфигуратора
-	r.Post("/api/cart/add", _handler.AddCart)                   // добавляет товар в корзину
-	r.Post("/api/cart/update", _handler.UpdateCartItemQuantity) // увеличивает или уменьшает количество товара в корзине
-	r.Post("/api/cart/remove", _handler.RemoveFromCart)         // удаляет товар из корзины/api/comparison/get_pc
-	r.Get("/api/cart/items", _handler.Cart_Items)               // получение всех товаров из корзины пользователя
-	r.Post("/api/cart/config/add", _handler.AddConfigToCart)    // добавление кастомной сборки в корзину
-	r.Get("/api/verify_token", _handler.IsTokenValid)           // проверка токена для смены пароля
-	r.Post("/api/reset_password", _handler.ResetPassword)       // запрос на смену пароля
+	r.Use(middleware.Logger)                                      // TODO заменить в будущем на другой логер
+	r.Use(_handler.SessionCheckMiddleware)                        // Для проверки сессии на работоспособность
+	r.Post("/api/register", _handler.Register)                    // Регистариция пользователя
+	r.Post("/api/login", _handler.Login)                          // авторизация пользователя
+	r.Post("/api/forgot_password", _handler.RequestPasswordReset) // смена пароля, отправка письма на почту
+	r.Get("/api/catalog", _handler.Catalog)                       // получение товаров для каталога
+	r.Get("/api/catalog/search", _handler.Catalog)                // поиск в каталоге
+	r.Get("/api/user/profile", _handler.GetProfile)               // получение профиля пользователя
+	r.Post("/api/user/upload_avatar", _handler.UploadAvatar)      // загрузка аватара пользователя
+	r.Get("/api/components", _handler.Components)                 // получение всех компонентов для конфигуратора
+	r.Post("/api/cart/add", _handler.AddCart)                     // добавляет товар в корзину
+	r.Post("/api/cart/update", _handler.UpdateCartItemQuantity)   // увеличивает или уменьшает количество товара в корзине
+	r.Post("/api/cart/remove", _handler.RemoveFromCart)           // удаляет товар из корзины/api/comparison/get_pc
+	r.Get("/api/cart/items", _handler.Cart_Items)                 // получение всех товаров из корзины пользователя
+	r.Post("/api/cart/config/add", _handler.AddConfigToCart)      // добавление кастомной сборки в корзину
+	r.Get("/api/verify_token", _handler.IsTokenValid)             // проверка токена для смены пароля
+	r.Post("/api/reset_password", _handler.ResetPassword)         // запрос на смену пароля
 	r.Post("/api/comparison/get_pc", _handler.GetComponentsPC)
 	r.Post("/api/user/update/phone", _handler.UpdatePhoneNumber)
 	r.Get("/api/check_auth", _handler.CheckAuth)
@@ -103,6 +103,8 @@ func main() {
 	r.Post("/api/new_order", _handler.AddOrder)
 	r.Post("/api/change_password_profile", _handler.ChangePasswordProfile)
 	r.Post("/api/change_user_data", _handler.ChangeUserData)
+	r.Get("/api/product/check/{article}", _handler.CheckConfigByArticle)
+	r.Get("/api/product", _handler.GetProductInfo)
 
 	if err := http.ListenAndServe(":3000", r); err != nil {
 		logger.Log.Warn(err.Error())

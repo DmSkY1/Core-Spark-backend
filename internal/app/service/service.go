@@ -69,9 +69,11 @@ type Serv interface {
 	GetAccountDashboardService(id int) (*models.AccountDashboard, error)
 	GetAllOrdersService(id int) (*[]models.Order, error)
 	GetInfoOrderService(id int, order_code string) (*[]models.Order_Items, error)
-	AddOrderService(id, pick_up_point_id int) error
+	AddOrderService(id, pick_up_point_id int) (string, error)
 	ChangePasswordProfileService(id int, old_password, new_password string) error
 	ChangeUserDataService(id int, name, surname string, phone string) error
+	CheckConfigByArticleService(article string) (bool, error)
+	GetProductInfoService(article string, id int) (*models.PC_model_By_Product, error)
 }
 
 func NewService(repo repository.Repo, email_sender email.SMPTSender) Serv {
@@ -186,6 +188,15 @@ func (s *service_struct) GetPickUpPoints(id int) (*[]models.PickUpPoint_Model, e
 	if err != nil {
 		return nil, err
 	}
+	return req, nil
+}
+
+func (s *service_struct) GetProductInfoService(article string, id int) (*models.PC_model_By_Product, error) {
+	req, err := s.repo.GetProductInfo(article, id)
+	if err != nil {
+		return nil, err
+	}
+
 	return req, nil
 }
 
@@ -319,13 +330,13 @@ func (s *service_struct) CartItemsService(user_id int) ([]models.Cart_Item, erro
 	return req, nil
 }
 
-func (s *service_struct) AddOrderService(id, pick_up_point_id int) error {
-	order_code := uuid.New()
-	err := s.repo.AddOrder(id, pick_up_point_id, "CP-"+order_code.String()[1:11])
+func (s *service_struct) AddOrderService(id, pick_up_point_id int) (string, error) {
+	order_code := "CP-" + uuid.New().String()[1:11]
+	err := s.repo.AddOrder(id, pick_up_point_id, order_code)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return order_code, nil
 }
 
 func (s *service_struct) RemoveFromCartService(id, config_id int) error {
@@ -360,6 +371,16 @@ func (s *service_struct) CatalogCheckAuthUser(search, pageStr, limitStr, price s
 	}
 
 	return items, nil
+}
+
+func (s *service_struct) CheckConfigByArticleService(article string) (bool, error) {
+	req, err := s.repo.CheckConfigByArticle(article)
+	if err != nil {
+		return false, err
+	}
+
+	return req, nil
+
 }
 
 func (s *service_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID, int, error) {

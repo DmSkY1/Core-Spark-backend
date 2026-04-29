@@ -18,6 +18,28 @@ type PC_model struct {
 	In_Cart        bool `json:"in_cart"`
 }
 
+type PC_model_By_Product struct {
+	ID_Config           int                              `json:"id_config"`
+	Name                string                           `json:"name"`
+	Photo               string                           `json:"photo"`
+	Article             string                           `json:"article"`
+	Category            string                           `json:"category"`
+	Price               float32                          `json:"price"`
+	Short_Description   string                           `json:"short_description"`
+	Product_Description string                           `json:"product_description"`
+	Processor           Processor_Comparison_Model       `json:"cpu"`
+	Motherboard         Motherboard_Comparison_Model     `json:"motherboard"`
+	GPU                 Video_Card_Comparison_Model      `json:"gpu"`
+	RAM                 Ram_Slot                         `json:"ram"`
+	SSD_M2              SSD_M2_Slot                      `json:"ssd_m2"`
+	SSD_SATA            SSD_SATA_Slot                    `json:"ssd_sata"`
+	HDD                 HDD_Slot                         `json:"hdd"`
+	Power_Unit          Power_Unit_Comparison_Model      `json:"power_unit"`
+	Frame               Frame_Comparison_Model           `json:"frame"`
+	Cooling_System      Cooling_System_Comparison_Models `json:"cooling_system"`
+	In_Cart             bool                             `json:"in_cart"`
+}
+
 type Ram_Slot struct {
 	Module   Ram_Comparison_Model
 	Quantity int

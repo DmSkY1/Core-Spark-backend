@@ -55,6 +55,8 @@ type Repo interface {
 	GetInfoOrder(id int, order_code string) (*[]models.Order_Items, error)
 	AddOrder(id, pick_up_point_id int, order_code string) (err error)
 	ChangeUserData(id int, name, surname string, phone string) error
+	CheckConfigByArticle(article string) (bool, error)
+	GetProductInfo(article string, id int) (*models.PC_model_By_Product, error)
 }
 
 func NewRepository(db *pgxpool.Pool) Repo {
@@ -913,6 +915,185 @@ func (r *repository_struct) CheckSession(session string) (*models.Session_Check_
 	return session_model, nil
 }
 
+func (r *repository_struct) CheckConfigByArticle(article string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM config_pc WHERE article = $1)`, article).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (r *repository_struct) GetProductInfo(article string, id int) (*models.PC_model_By_Product, error) {
+	var pc_product models.PC_model_By_Product
+	sql := `
+		SELECT cp.id, cp.name, cp.photo, cp.article, cp.category, cp.price, cp.short_description, cp.product_description,
+			proc.manufacturer, proc.product_line, proc.model,
+			proc.socket, proc.architecture, proc.number_cores,
+			proc.number_threads, proc.frequency, proc.tdp,
+			proc.max_tdp, proc.ram_standart, proc.integrated_graphics_core,
+			m.name, m.manufacturer, m.chipset,
+			m.ram_type, m.max_ram, m.socket,
+			m.pcie_x16_port, m.pcie_x1_port, m.wifi,
+			m.audio_codec, m.form_factor, m.ram_slots,
+			m.m2_slots, m.sata_slots, v.manufacturer,
+			v.gpu_manufacturer, v.series,
+			v.pcie, v.video_memory_capacity, v.hdmi,
+			v.displayport, v.memory_type, v.gpu_frequency,
+			v.bandwidth, v.video_memory_frequency, v.consumption,
+			v.memory_bus, r.name, r.brand,
+			r.volume_one_module, r.memory_type, r.frequency,
+			r.number_modules, rm.quantity, ssdm2.manufacturer,
+			ssdm2.model, ssdm2.pcie, ssdm2.storage_capacity,
+			ssdm2.reading_speed, ssdm2.write_speed, ssdm2.rewrite_resource,
+			ssdm2c.quantity, ssdsata.manufacturer, ssdsata.model,
+			ssdsata.storage_capacity, ssdsata.reading_speed, ssdsata.write_speed,
+			ssdsata.rewrite_resource, ssdsatac.quantity, h.manufacturer,
+			h.form_factor, h.model, h.storage_capacity, h.rotation_speed,
+			hc.quantity, pw.manufacturer, pw.model,
+			pw.power, pw.has_ocp, pw.has_ovp,
+			pw.has_uvp, pw.has_scp, pw.has_opp,
+			pw.fan_size, pw.form_factor, f.manufacturer,
+			f.model, f.supports_mini_itx, f.supports_micro_atx,
+			f.supports_atx, f.supports_e_atx, f.liquid_cooling_system,
+			f.fans_included, f.maximum_length_gpu, f.maximum_cooler_height,
+			f.type_size, cs.manufacturer, cs.model,
+			cs.type, cs.sockets, cs.dissipated_power,
+			CASE
+				WHEN cpc.id_config IS NOT NULL THEN TRUE ELSE FALSE
+			END AS in_cart
+		FROM config_pc cp
+		JOIN processor proc ON cp.id_processor = proc.id
+		JOIN motherboard m ON cp.id_motherboard = m.id
+		LEFT JOIN video_card v ON cp.id_video_card = v.id
+		JOIN ram_config rm ON cp.id_pc_ram_config = rm.id
+		JOIN ram r ON rm.id_ram = r.id
+		LEFT JOIN ssd_m2_config ssdm2c ON cp.id_ssd_m2_config = ssdm2c.id
+		LEFT JOIN ssd_m2 ssdm2 ON ssdm2c.id_ssd_m2 = ssdm2.id
+		LEFT JOIN ssd_sata_config ssdsatac ON cp.id_ssd_config = ssdsatac.id
+		LEFT JOIN ssd_sata ssdsata ON ssdsatac.id_ssd_sata = ssdsata.id
+		LEFT JOIN hdd_config hc ON cp.id_hdd_config = hc.id
+		LEFT JOIN hdd h ON hc.id_hdd = h.id
+		JOIN power_unit pw ON cp.id_power_unit = pw.id
+		JOIN frame f ON cp.id_frame = f.id
+		JOIN cooling_system cs ON cp.id_cooling_system = cs.id
+		LEFT JOIN cart c ON c.id_user = $2
+		LEFT JOIN cart_pc cpc ON cpc.id_cart = c.id AND cpc.id_config = cp.id
+		WHERE cp.article = $1
+	`
+
+	err := r.db.QueryRow(context.Background(), sql, article, id).Scan(
+		&pc_product.ID_Config,
+		&pc_product.Name,
+		&pc_product.Photo,
+		&pc_product.Article,
+		&pc_product.Category,
+		&pc_product.Price,
+		&pc_product.Short_Description,
+		&pc_product.Product_Description,
+		&pc_product.Processor.Manufacturer,
+		&pc_product.Processor.Product_Line,
+		&pc_product.Processor.Model,
+		&pc_product.Processor.Socket,
+		&pc_product.Processor.Architecture,
+		&pc_product.Processor.Number_Cores,
+		&pc_product.Processor.Number_Threads,
+		&pc_product.Processor.Frequency,
+		&pc_product.Processor.TDP,
+		&pc_product.Processor.Max_TDP,
+		&pc_product.Processor.Ram_Standart,
+		&pc_product.Processor.Integrated_Graphics_Core,
+		&pc_product.Motherboard.Name,
+		&pc_product.Motherboard.Manufacturer,
+		&pc_product.Motherboard.Chipset,
+		&pc_product.Motherboard.Ram_Type,
+		&pc_product.Motherboard.Max_Ram,
+		&pc_product.Motherboard.Socket,
+		&pc_product.Motherboard.PCIE_x16_Port,
+		&pc_product.Motherboard.PCIE_x1_Port,
+		&pc_product.Motherboard.Wifi,
+		&pc_product.Motherboard.Audio_Codec,
+		&pc_product.Motherboard.Form_Factor,
+		&pc_product.Motherboard.Ram_Slots,
+		&pc_product.Motherboard.M2_Slots,
+		&pc_product.Motherboard.Sata_Slots,
+		&pc_product.GPU.Manufacturer,
+		&pc_product.GPU.GPU_Manufacturer,
+		&pc_product.GPU.Series,
+		&pc_product.GPU.PCIE,
+		&pc_product.GPU.Video_Memory_Capacity,
+		&pc_product.GPU.HDMI,
+		&pc_product.GPU.DisplayPort,
+		&pc_product.GPU.Memory_Type,
+		&pc_product.GPU.GPU_Frequency,
+		&pc_product.GPU.Bandwidth,
+		&pc_product.GPU.Video_Memory_Frequency,
+		&pc_product.GPU.Consumption,
+		&pc_product.GPU.Memory_Bus,
+		&pc_product.RAM.Module.Name,
+		&pc_product.RAM.Module.Brand,
+		&pc_product.RAM.Module.Volume_One_Module,
+		&pc_product.RAM.Module.Memory_Type,
+		&pc_product.RAM.Module.Frequency,
+		&pc_product.RAM.Module.Number_Modules,
+		&pc_product.RAM.Quantity,
+		&pc_product.SSD_M2.Module.Manufacturer,
+		&pc_product.SSD_M2.Module.Model,
+		&pc_product.SSD_M2.Module.PCIE,
+		&pc_product.SSD_M2.Module.Storage_Capacity,
+		&pc_product.SSD_M2.Module.Reading_Speed,
+		&pc_product.SSD_M2.Module.Write_Speed,
+		&pc_product.SSD_M2.Module.Rewrite_Resource,
+		&pc_product.SSD_M2.Quantity,
+		&pc_product.SSD_SATA.Module.Manufacturer,
+		&pc_product.SSD_SATA.Module.Model,
+		&pc_product.SSD_SATA.Module.Storage_Capacity,
+		&pc_product.SSD_SATA.Module.Reading_Speed,
+		&pc_product.SSD_SATA.Module.Write_Speed,
+		&pc_product.SSD_SATA.Module.Rewrite_Resource,
+		&pc_product.SSD_SATA.Quantity,
+		&pc_product.HDD.Module.Manufacturer,
+		&pc_product.HDD.Module.Form_Factor,
+		&pc_product.HDD.Module.Model,
+		&pc_product.HDD.Module.Storage_Capacity,
+		&pc_product.HDD.Module.Rotation_Speed,
+		&pc_product.HDD.Quantity,
+		&pc_product.Power_Unit.Manufacturer,
+		&pc_product.Power_Unit.Model,
+		&pc_product.Power_Unit.Power,
+		&pc_product.Power_Unit.Has_Ocp,
+		&pc_product.Power_Unit.Has_Ovp,
+		&pc_product.Power_Unit.Has_Uvp,
+		&pc_product.Power_Unit.Has_Scp,
+		&pc_product.Power_Unit.Has_Opp,
+		&pc_product.Power_Unit.Fan_Size,
+		&pc_product.Power_Unit.Form_Factor,
+		&pc_product.Frame.Manufacturer,
+		&pc_product.Frame.Model,
+		&pc_product.Frame.Supports_Mini_Itx,
+		&pc_product.Frame.Supports_Micro_Atx,
+		&pc_product.Frame.Supports_Atx,
+		&pc_product.Frame.Supports_E_Atx,
+		&pc_product.Frame.Liquid_Cooling_System,
+		&pc_product.Frame.Fans_Included,
+		&pc_product.Frame.Maximum_Length_GPU,
+		&pc_product.Frame.Maximum_Cooler_Height,
+		&pc_product.Frame.Type_Size,
+		&pc_product.Cooling_System.Manufacturer,
+		&pc_product.Cooling_System.Model,
+		&pc_product.Cooling_System.Type,
+		&pc_product.Cooling_System.Sockets,
+		&pc_product.Cooling_System.Dissipated_Power,
+		&pc_product.In_Cart,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &pc_product, nil
+}
+
 func (r *repository_struct) GetPCByID(ctx context.Context, id int, sql string, user_id int) (models.PC_model, error) {
 	var pc_components models.PC_model
 	err := r.db.QueryRow(ctx, sql, id, user_id).Scan(
@@ -1307,7 +1488,7 @@ func (r *repository_struct) GetAllOrders(id int) (*[]models.Order, error) {
 		`SELECT o.id, o.order_code, s.name, o.date, o.sum FROM "order" o
 		JOIN status_order s ON o.id_status = s.id
 		WHERE id_user = $1
-		ORDER BY date`,
+		ORDER BY date DESC`,
 		id,
 	)
 	if err != nil {
