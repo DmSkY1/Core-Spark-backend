@@ -80,7 +80,7 @@ func main() {
 	r.Post("/login", _handler.Login)                            // авторизация пользователя
 	r.Post("/forgot_password", _handler.RequestPasswordReset)   // смена пароля, отправка письма на почту
 	r.Get("/api/catalog", _handler.Catalog)                     // получение товаров для каталога
-	r.Get("/api/catalog/search", _handler.SearchCatalog)        // поиск в каталоге
+	r.Get("/api/catalog/search", _handler.Catalog)              // поиск в каталоге
 	r.Get("/api/user/profile", _handler.GetProfile)             // получение профиля пользователя
 	r.Post("/api/user/upload_avatar", _handler.UploadAvatar)    // загрузка аватара пользователя
 	r.Get("/api/components", _handler.Components)               // получение всех компонентов для конфигуратора

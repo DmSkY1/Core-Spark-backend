@@ -17,6 +17,13 @@ type User struct {
 	PickUpPoint *int      `json:"pick_up_point"`
 }
 
+type User_mail struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Surname string `json:"surname"`
+	Email   string `json:"email"`
+}
+
 type ResponseUpdatePhoneModel struct {
 	Phone string `json:"phone"`
 }

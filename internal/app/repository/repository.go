@@ -25,17 +25,16 @@ type repository_struct struct {
 }
 
 type Repo interface {
-	GetUserById(id int) (*models.User, error)
 	ChangePasswordProfile(id int, new_password, old_password string) error
 	CreateUser(register_data *models.Register_Model) error
 	LoginUser(login_data *models.Login_Model) (uuid.UUID, int, error)
 	AddAvatar(avatar_path string, id int) error
-	LoadCatalogGuest(page, limit, id int, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_Guests_Model, error)
-	LoadCatalogAuthUser(page, limit, id int, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_AuthUser_Model, error)
+	LoadCatalogGuest(page, limit, id int, search, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_Guests_Model, error)
+	LoadCatalogAuthUser(page, limit, id int, search, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_AuthUser_Model, error)
 	Components() (*models.Components, error)
-	GetUserByEmail(email string) (*models.User, error)
+	GetUserByEmail(email string) (*models.User_mail, error)
 	RequestResetPassword(id int, token string) error
-	ResetPasswordRepository(password string, id int) error
+	ResetPasswordRepository(password []byte, id int) error
 	TokenVerification(token string) (*models.Token_Verification_Model, error)
 	CheckSession(session string) (*models.Session_Check_Model, error)
 	DeleteSession(session string) error
@@ -45,8 +44,6 @@ type Repo interface {
 	RemoveFromCart(user_id, config_id int) error
 	UpdateCartItemQuantity(user_id, config_id, num int) error
 	CartItems(user_id int) ([]models.Cart_Item, error)
-	SearchItemsGuest(ram, gpu, cpu, category []string, price, search_string string, page, limit int, order string) ([]models.Response_For_Guests_Model, error)
-	SearchItemsAuthUser(ram, gpu, cpu, category []string, price, search_string string, id, page, limit int, order string) ([]models.Response_For_AuthUser_Model, error)
 	AddCustomConfigToCart(id int, config models.User_Config_Model) (err error)
 	GettingPCForComparison(pc_id []int, user_id int) (*[]models.PC_model, error)
 	AddPhoneUser(id int, number_phone string) error
@@ -444,7 +441,6 @@ func (r *repository_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID
 	}
 
 	if correct_password := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(login_data.Password)); correct_password != nil {
-		logger.Log.Info(correct_password.Error())
 		return uuid.Nil, 0, correct_password
 	}
 	session_uuid := uuid.New()
@@ -555,7 +551,7 @@ func buildFilterCondition(start_arg_num int, ram, gpu, cpu, category []string, p
 	return args_num, args, wcondition
 }
 
-func (r *repository_struct) LoadCatalogAuthUser(page, limit, id int, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_AuthUser_Model, error) { // Загрузка каталога для авторизованного пользователя
+func (r *repository_struct) LoadCatalogAuthUser(page, limit, id int, search, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_AuthUser_Model, error) { // Загрузка каталога для авторизованного пользователя
 
 	args_num, args, wcondition := buildFilterCondition(1, ram, gpu, cpu, category, price) // определение основных объектов
 
@@ -575,6 +571,11 @@ func (r *repository_struct) LoadCatalogAuthUser(page, limit, id int, order strin
 	LEFT JOIN cart ct on ct.id_user = $%d
 	LEFT JOIN cart_pc cp ON cp.id_cart = ct.id AND cp.id_config = c.id 
 	`, args_num)
+	args_num++
+
+	search_string := "%" + search + "%"
+	args = append(args, search_string)
+	wcondition = append(wcondition, fmt.Sprintf(`(c.name ILIKE $%d OR article ILIKE $%d)`, args_num, args_num))
 	args_num++
 
 	if len(wcondition) > 0 { // объединение всех условий в одно целое, и добавление в скрипт
@@ -636,10 +637,11 @@ func (r *repository_struct) LogOutProfile(id int, session string) error {
 	return nil
 }
 
-func (r *repository_struct) LoadCatalogGuest(page, limit, id int, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_Guests_Model, error) { // Загрузка каталога для гостя
+func (r *repository_struct) LoadCatalogGuest(page, limit, id int, search, order string, category, ram, gpu, cpu []string, price string) ([]models.Response_For_Guests_Model, error) { // Загрузка каталога для гостя
 
 	// TODO Сократить код, вынести большинство повторяющегося кода в отдельные функции
 	args_num, args, wcondition := buildFilterCondition(1, ram, gpu, cpu, category, price)
+	search_string := "%" + search + "%"
 
 	sql := `SELECT c.id, c.photo, c.category, c.name, p.manufacturer, p.product_line,  
 		v.gpu_manufacturer, v.series, ((rm.volume_one_module * rm.number_modules) * rc.quantity) AS total_ram_gb, c.price,
@@ -651,17 +653,21 @@ func (r *repository_struct) LoadCatalogGuest(page, limit, id int, order string, 
 		LEFT JOIN ram_config rc ON c.id_pc_ram_config = rc.id
 		LEFT JOIN ram rm ON rc.id_ram = rm.id`
 
+	args = append(args, search_string)
+	wcondition = append(wcondition, fmt.Sprintf(`(c.name ILIKE $%d OR article ILIKE $%d)`, args_num, args_num))
+	args_num++
+
 	if len(wcondition) > 0 {
 		sql += " \nWHERE c.is_catalog = true AND " + strings.Join(wcondition, " AND ")
 	}
 
-	sortDir := "DESC"
+	sortDir := "ASC"
 	orderInt, err := strconv.Atoi(order)
 	if err != nil {
-		orderInt = 1
+		orderInt = 0
 	}
-	if orderInt == 0 || orderInt == 1 {
-		sortDir = "ASC"
+	if orderInt == 1 {
+		sortDir = "DESC"
 	}
 	sql += fmt.Sprintf(" \nORDER BY c.price %s", sortDir)
 	total := (page - 1) * limit
@@ -725,31 +731,6 @@ func (r *repository_struct) RequestResetPassword(id int, token string) error { /
 	return nil
 }
 
-func (r *repository_struct) GetUserById(id int) (*models.User, error) { // Получение данных пользователя по id
-	user := new(models.User)
-
-	err := r.db.QueryRow(context.Background(),
-		`SELECT id, name, surname, email, telephone, password, avatar, created_at, pick_up_point
-			FROM users
-			WHERE id = $1`, id).Scan(
-		&user.ID,
-		&user.Name,
-		&user.Surname,
-		&user.Email,
-		&user.Telephone,
-		&user.Password,
-		&user.Avatar,
-		&user.Created_at,
-		&user.PickUpPoint,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return user, nil
-}
-
 func (r *repository_struct) GetAllPickUpPoints(id int) (*[]models.PickUpPoint_Model, error) {
 	var items []models.PickUpPoint_Model
 	req, err := r.db.Query(
@@ -793,21 +774,16 @@ func (r *repository_struct) SavePickUpPointUser(user_id, pick_up_point_id int) e
 	return nil
 }
 
-func (r *repository_struct) GetUserByEmail(email string) (*models.User, error) { // Получение данных пользователя по почте
-	user := new(models.User) // Модель для хранения данных пользователя
+func (r *repository_struct) GetUserByEmail(email string) (*models.User_mail, error) { // Получение данных пользователя по почте
+	user := new(models.User_mail) // Модель для хранения данных пользователя
 	err := r.db.QueryRow(context.Background(),
-		`SELECT id, name, surname, email, telephone, password, avatar, created_at, pick_up_point
+		`SELECT id, name, surname, email
 			FROM users
 			WHERE email = $1`, email).Scan(
 		&user.ID,
 		&user.Name,
 		&user.Surname,
 		&user.Email,
-		&user.Telephone,
-		&user.Password,
-		&user.Avatar,
-		&user.Created_at,
-		&user.PickUpPoint,
 	)
 
 	if err != nil {
@@ -819,8 +795,7 @@ func (r *repository_struct) GetUserByEmail(email string) (*models.User, error) {
 
 func (r *repository_struct) TokenVerification(token string) (*models.Token_Verification_Model, error) { // Проверка токена сброса пароля на достоверность
 	result := new(models.Token_Verification_Model)
-
-	err := r.db.QueryRow(context.Background(), `SELECT id, expires_at FROM password_reset_tokens WHERE token = $1`, token).Scan(&result.ID, &result.Expires_At)
+	err := r.db.QueryRow(context.Background(), `SELECT user_id, expires_at, is_active FROM password_reset_tokens WHERE token = $1`, token).Scan(&result.ID, &result.Expires_At, &result.Is_Active)
 	if err != nil {
 		return nil, err
 	}
@@ -828,8 +803,24 @@ func (r *repository_struct) TokenVerification(token string) (*models.Token_Verif
 	return result, nil
 }
 
-func (r *repository_struct) ResetPasswordRepository(password string, id int) error { // Метод для сброса пароля, который меняет пароль на новый
-	_, err := r.db.Exec(context.Background(), `UPDATE users SET password = $1 WHERE id = $2`, password, id)
+func (r *repository_struct) ResetPasswordRepository(password []byte, id int) error { // Метод для сброса пароля, который меняет пароль на новый
+
+	_, err := r.db.Exec(
+		context.Background(),
+		`UPDATE users SET password = $1 WHERE id = $2;`,
+		password,
+		id,
+	)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	_, err = r.db.Exec(
+		context.Background(),
+		`UPDATE password_reset_tokens SET is_active = false WHERE user_id = $1`,
+		id,
+	)
 	if err != nil {
 		return err
 	}
@@ -920,155 +911,6 @@ func (r *repository_struct) CheckSession(session string) (*models.Session_Check_
 		return nil, err // TODO логировать
 	}
 	return session_model, nil
-}
-
-func (r *repository_struct) SearchItemsAuthUser(ram, gpu, cpu, category []string, price, search_string string, id, page, limit int, order string) ([]models.Response_For_AuthUser_Model, error) {
-
-	// TODO Сократить код, вынести большинство повторяющегося кода в отдельные функции
-
-	var items []models.Response_For_AuthUser_Model
-	search_string = "%" + search_string + "%"
-	args_num, args, wcondition := buildFilterCondition(1, ram, gpu, cpu, category, price)
-	sql := `SELECT c.id, c.photo, c.category, c.name, p.manufacturer, p.product_line,  
-		v.gpu_manufacturer, v.series, ((rm.volume_one_module * rm.number_modules) * rc.quantity) AS total_ram_gb, c.price,
-		CASE WHEN cp.id IS NOT NULL THEN true ELSE false END AS in_cart,
-		COUNT(*) OVER() AS total_count,
-		c.article AS article
-		FROM config_pc c
-		LEFT JOIN processor p ON c.id_processor = p.id
-		LEFT JOIN video_card v ON c.id_video_card = v.id
-		LEFT JOIN ram_config rc ON c.id_pc_ram_config = rc.id
-		LEFT JOIN ram rm ON rc.id_ram = rm.id
-	`
-	args = append(args, id) // добавлеине id в аргументы, для корректного формирования SQL скрипта
-	sql += fmt.Sprintf(`
-		LEFT JOIN cart ct on ct.id_user = $%d
-		LEFT JOIN cart_pc cp ON cp.id_cart = ct.id AND cp.id_config = c.id 
-		`,
-		args_num,
-	)
-	args_num++
-
-	args = append(args, search_string)
-	args = append(args, search_string)
-	wcondition = append(wcondition, fmt.Sprintf(`(c.name ILIKE $%d OR article ILIKE $%d)`, args_num, args_num+1))
-	args_num += 2
-
-	if len(wcondition) > 0 { // объединение всех условий в одно целое, и добавление в скрипт
-		sql += " \nWHERE c.is_catalog = true AND " + strings.Join(wcondition, " AND ")
-	}
-
-	sortDir := "ASC" // значение по умолчанию, будет по возрастанию цены
-	orderInt, err := strconv.Atoi(order)
-	if err != nil {
-		orderInt = 0
-	}
-	if orderInt == 1 {
-		sortDir = "DESC"
-	}
-	sql += fmt.Sprintf(" \nORDER BY c.price %s", sortDir)
-	total := (page - 1) * limit
-	sql += fmt.Sprintf(" \nLIMIT $%d OFFSET $%d", args_num, args_num+1)
-	args = append(args, limit, total)
-
-	rows, err := r.db.Query(context.Background(), sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var item models.Response_For_AuthUser_Model
-		err := rows.Scan(
-			&item.Id,
-			&item.Photo,
-			&item.Category,
-			&item.Name,
-			&item.Manufacturer,
-			&item.Product_Line,
-			&item.GPU_Manufacturer,
-			&item.Series,
-			&item.Total_Ram_GB,
-			&item.Price,
-			&item.In_Cart,
-			&item.Total_count,
-			&item.Article,
-		)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-func (r *repository_struct) SearchItemsGuest(ram, gpu, cpu, category []string, price, search_string string, page, limit int, order string) ([]models.Response_For_Guests_Model, error) {
-
-	// TODO Сократить код, вынести большинство повторяющегося кода в отдельные функции
-
-	var items []models.Response_For_Guests_Model
-	search_string = "%" + search_string + "%"
-	args_num, args, wcondition := buildFilterCondition(1, ram, gpu, cpu, category, price)
-	sql := `SELECT c.id, c.photo, c.category, c.name, p.manufacturer, p.product_line,  
-		v.gpu_manufacturer, v.series, ((rm.volume_one_module * rm.number_modules) * rc.quantity) AS total_ram_gb, c.price,
-		COUNT(*) OVER() AS total_count,
-		c.article AS article
-		FROM config_pc c
-		LEFT JOIN processor p ON c.id_processor = p.id
-		LEFT JOIN video_card v ON c.id_video_card = v.id
-		LEFT JOIN ram_config rc ON c.id_pc_ram_config = rc.id
-		LEFT JOIN ram rm ON rc.id_ram = rm.id`
-	args = append(args, search_string)
-	args = append(args, search_string)
-	wcondition = append(wcondition, fmt.Sprintf(`(c.name ILIKE $%d OR article ILIKE $%d)`, args_num, args_num+1))
-	args_num += 2
-
-	if len(wcondition) > 0 { // объединение всех условий в одно целое, и добавление в скрипт
-		sql += " \nWHERE c.is_catalog = true AND " + strings.Join(wcondition, " AND ")
-	}
-
-	sortDir := "ASC" // значение по умолчанию, будет по возрастанию цены
-	orderInt, err := strconv.Atoi(order)
-	if err != nil {
-		orderInt = 0
-	}
-	if orderInt == 1 {
-		sortDir = "DESC"
-	}
-	sql += fmt.Sprintf(" \nORDER BY c.price %s", sortDir)
-	total := (page - 1) * limit
-	sql += fmt.Sprintf(" \nLIMIT $%d OFFSET $%d", args_num, args_num+1)
-	args = append(args, limit, total)
-
-	fmt.Println(sql)
-	rows, err := r.db.Query(context.Background(), sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var item models.Response_For_Guests_Model
-		err := rows.Scan(
-			&item.Id,
-			&item.Photo,
-			&item.Category,
-			&item.Name,
-			&item.Manufacturer,
-			&item.Product_Line,
-			&item.GPU_Manufacturer,
-			&item.Series,
-			&item.Total_Ram_GB,
-			&item.Price,
-			&item.Total_count,
-			&item.Article,
-		)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, nil
 }
 
 func (r *repository_struct) GetPCByID(ctx context.Context, id int, sql string, user_id int) (models.PC_model, error) {

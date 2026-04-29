@@ -68,62 +68,6 @@ func (h *handler_struct) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *handler_struct) SearchCatalog(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	order := query.Get("order")
-	price := query.Get("price")
-	category := query["category"]
-	ram := query["ram"]
-	gpu := query["gpu"]
-	cpu := query["cpu"]
-	search_string := query.Get("search")
-	page := query.Get("page")
-	userid, ok := r.Context().Value("user_id").(int)
-	if !ok {
-		items, err := h.serv.SearchGuestService(
-			normalizeToStringSlice(ram),
-			normalizeToStringSlice(gpu),
-			normalizeToStringSlice(cpu),
-			normalizeToStringSlice(category),
-			price,
-			search_string,
-			page,
-			"9",
-			order,
-		) // Жеская передача 9, заключается в особой ненадобности регулировать лимит пользователем, поэтому задано фиксированное число
-		if err != nil {
-			fmt.Println(err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(items); err != nil {
-			return
-		}
-	} else {
-		items, err := h.serv.SearchAuthUserService(
-			normalizeToStringSlice(ram),
-			normalizeToStringSlice(gpu),
-			normalizeToStringSlice(cpu),
-			normalizeToStringSlice(category),
-			price,
-			search_string,
-			userid,
-			page,
-			"9",
-			order,
-		)
-		if err != nil {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(items); err != nil {
-			return
-		}
-	}
-}
-
 func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()        // получение query параметров
 	order := query.Get("order")   // параметр для cортировки
@@ -133,10 +77,12 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 	gpu := query["gpu"]           // параметр для ведокарты
 	cpu := query["cpu"]           // параметр для процесосора
 	page := query.Get("page")     // номер страницы
+	search_string := query.Get("search")
 	// limit := query.Get("limit") // лимит карточек товаров
 	userid, ok := r.Context().Value("user_id").(int)
 	if !ok {
 		items, err := h.serv.CatalogCheckGuest(
+			search_string,
 			page,
 			"9",
 			price,
@@ -158,6 +104,7 @@ func (h *handler_struct) Catalog(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		items, err := h.serv.CatalogCheckAuthUser(
+			search_string,
 			page,
 			"9",
 			price,
@@ -467,13 +414,12 @@ func (h *handler_struct) RequestPasswordReset(w http.ResponseWriter, r *http.Req
 	json.NewDecoder(r.Body).Decode(user_mail)
 	defer r.Body.Close()
 
-	go func() {
-		err := h.serv.ReqPasswordReset(user_mail.Email)
-		if err != nil {
-			http.Error(w, "failed to process request", http.StatusInternalServerError)
-			return
-		}
-	}()
+	err := h.serv.ReqPasswordReset(user_mail.Email)
+	if err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "failed to process request", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -488,7 +434,7 @@ func (h *handler_struct) Components(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := msgpack.Unmarshal(data, items); err != nil {
+	if err := msgpack.Unmarshal(data, &items); err != nil {
 		logger.Log.Error(err.Error())
 	}
 
@@ -518,7 +464,7 @@ func (h *handler_struct) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("успех"))
+	w.WriteHeader(http.StatusOK)
 
 }
 
@@ -543,7 +489,6 @@ func (h *handler_struct) GetComponentsPC(w http.ResponseWriter, r *http.Request)
 
 	user_id, ok := r.Context().Value("user_id").(int)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		user_id = 0
 	}
 
@@ -583,7 +528,7 @@ func (h *handler_struct) Login(w http.ResponseWriter, r *http.Request) {
 
 	userSession_uuid, _, err := h.serv.LoginUser(userLogin)
 	if err != nil {
-		logger.Log.Error(err.Error())
+		http.Error(w, "Incorrect login or password", http.StatusUnauthorized)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -620,6 +565,8 @@ func (h *handler_struct) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	req := new(models.Reset_Password_Model)
 
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "Token not found", http.StatusInternalServerError)
 		return
 	} // Это нужно для дополнительной проверки валидности, на всякий случай
 	defer r.Body.Close()
@@ -628,12 +575,18 @@ func (h *handler_struct) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing or invalid token", http.StatusBadRequest)
 		return
 	}
+	if req.Password == "" {
+		http.Error(w, "The password field is empty", http.StatusBadRequest)
+		return
+	}
 	id, err := h.serv.TokenVerifier(req.Token)
 	if err != nil {
 		http.Error(w, "Token is not valid", http.StatusBadRequest)
 		return
 	}
 	if err := h.serv.ResetPasswordService(id, req.Password); err != nil {
+		logger.Log.Error(err.Error())
+		http.Error(w, "Token is not valid", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)

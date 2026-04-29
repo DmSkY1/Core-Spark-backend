@@ -46,8 +46,8 @@ type Serv interface {
 	RegisterUser(register_data *models.Register_Model) error
 	LoginUser(login_data *models.Login_Model) (uuid.UUID, int, error)
 	AvatarCheck(files []*multipart.FileHeader, id int) error
-	CatalogCheckGuest(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_Guests_Model, error)
-	CatalogCheckAuthUser(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_AuthUser_Model, error)
+	CatalogCheckGuest(search, pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_Guests_Model, error)
+	CatalogCheckAuthUser(search, pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_AuthUser_Model, error)
 	GetComponents() (*models.Components, error)
 	ReqPasswordReset(email string) error
 	TokenVerifier(token string) (int, error)
@@ -61,8 +61,6 @@ type Serv interface {
 	RemoveFromCartService(id, config_id int) error
 	CartItemsService(user_id int) ([]models.Cart_Item, error)
 	AddCustomConfigToCartService(id int, config models.User_Config_Model) error
-	SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error)
-	SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error)
 	GettingPCForComparisonService(pc_id []int, user_id int) (*[]models.PC_model, error)
 	UpdatePhone(id int, phone_number string) error
 	LogOut(id int, session string) error
@@ -241,35 +239,6 @@ func (s *service_struct) GetComponents() (*models.Components, error) {
 	return items, nil
 }
 
-func (s *service_struct) SearchAuthUserService(ram, gpu, cpu, category []string, price, search_string string, id int, pageStr, limitStr string, order string) ([]models.Response_For_AuthUser_Model, error) {
-	var page, limit int
-
-	if pageStr == "" {
-		page = 1
-	} else {
-		var err error
-		page, err = strconv.Atoi(pageStr)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if limitStr == "" {
-		limit = 10
-	} else {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			return nil, err
-		}
-	}
-	req, err := s.repo.SearchItemsAuthUser(ram, gpu, cpu, category, price, search_string, id, page, limit, order)
-	if err != nil {
-		return nil, err
-	}
-	return req, nil
-}
-
 func (s *service_struct) GetAccountDashboardService(id int) (*models.AccountDashboard, error) {
 	req, err := s.repo.GetAccountDashboard(id)
 	if err != nil {
@@ -296,36 +265,7 @@ func (s *service_struct) GetInfoOrderService(id int, order_code string) (*[]mode
 
 }
 
-func (s *service_struct) SearchGuestService(ram, gpu, cpu, category []string, price, search_string string, pageStr, limitStr string, order string) ([]models.Response_For_Guests_Model, error) {
-	var page, limit int
-
-	if pageStr == "" {
-		page = 1
-	} else {
-		var err error
-		page, err = strconv.Atoi(pageStr)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if limitStr == "" {
-		limit = 10
-	} else {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			return nil, err
-		}
-	}
-	req, err := s.repo.SearchItemsGuest(ram, gpu, cpu, category, price, search_string, page, limit, order)
-	if err != nil {
-		return nil, err
-	}
-	return req, nil
-}
-
-func (s *service_struct) CatalogCheckGuest(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_Guests_Model, error) {
+func (s *service_struct) CatalogCheckGuest(search, pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_Guests_Model, error) {
 	var page, limit int
 
 	if pageStr == "" {
@@ -348,7 +288,7 @@ func (s *service_struct) CatalogCheckGuest(pageStr, limitStr, price string, id i
 		}
 	}
 
-	items, err := s.repo.LoadCatalogGuest(page, limit, id, order, category, ram, gpu, cpu, price)
+	items, err := s.repo.LoadCatalogGuest(page, limit, id, search, order, category, ram, gpu, cpu, price)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +336,7 @@ func (s *service_struct) RemoveFromCartService(id, config_id int) error {
 	return nil
 }
 
-func (s *service_struct) CatalogCheckAuthUser(pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_AuthUser_Model, error) {
+func (s *service_struct) CatalogCheckAuthUser(search, pageStr, limitStr, price string, id int, order string, category, ram, gpu, cpu []string) ([]models.Response_For_AuthUser_Model, error) {
 	var page, limit int
 
 	if pageStr == "" {
@@ -414,7 +354,7 @@ func (s *service_struct) CatalogCheckAuthUser(pageStr, limitStr, price string, i
 		return nil, err
 	}
 
-	items, err := s.repo.LoadCatalogAuthUser(page, limit, id, order, category, ram, gpu, cpu, price)
+	items, err := s.repo.LoadCatalogAuthUser(page, limit, id, search, order, category, ram, gpu, cpu, price)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +365,6 @@ func (s *service_struct) CatalogCheckAuthUser(pageStr, limitStr, price string, i
 func (s *service_struct) LoginUser(login_data *models.Login_Model) (uuid.UUID, int, error) {
 	userSession_uuid, user_id, err := s.repo.LoginUser(login_data)
 	if err != nil {
-		logger.Log.Info(err.Error())
 		return uuid.Nil, 0, err
 	}
 	return userSession_uuid, user_id, nil
@@ -436,18 +375,21 @@ func (s *service_struct) TokenVerifier(token string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if time.Now().UTC().After(result.Expires_At) {
+	if time.Now().UTC().After(result.Expires_At) || !result.Is_Active {
 		return 0, errors.New("xz") // TODO придумать ошибку
 	}
 	return result.ID, nil
 }
 
 func (s *service_struct) ResetPasswordService(id int, password string) error {
+	if utf8.RuneCountInString(password) < 8 {
+		return fmt.Errorf("Password is less than 8 characters")
+	}
 	hash_password, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	err = s.repo.ResetPasswordRepository(string(hash_password), id)
+	err = s.repo.ResetPasswordRepository(hash_password, id)
 	if err != nil {
 		return err
 	}
@@ -517,7 +459,7 @@ func (s *service_struct) ReqPasswordReset(email string) error { // Запрос 
 		return err
 	}
 
-	resetLink := os.Getenv("APP_URL") + "/reset-password?token=" + token
+	resetLink := os.Getenv("APP_URL") + "/reset_password/?token=" + token
 	err = s.email_sender.SendPasswordReset(email, resetLink)
 	if err != nil {
 		return err

@@ -12,7 +12,7 @@ type Response_For_Guests_Model struct {
 	Total_Ram_GB     int     `json:"total_ram_gb"`
 	Price            float32 `json:"price"`
 	Total_count      int     `json:"total_count"`
-	Article          string  `json:"article"`
+	Article          *string `json:"article"`
 }
 
 type Response_For_AuthUser_Model struct {
